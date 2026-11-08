@@ -40,11 +40,11 @@ The project is not another backup scheduler and does not claim that the existenc
 
 ### Airon
 
-Airon remains an independent project and is read-only for this work. It provides job execution, prompt/skill/MCP orchestration, run IDs, JSON run logs, and token-usage reporting. Reksicherung should integrate using Airon's existing documented interfaces (configuration, skills, MCP servers, and run outputs); this specification does not require changes to Airon.
+Airon remains an independent project and is read-only for this work. It provides job execution, prompt/skill/MCP orchestration, JSON run logs, and token-usage reporting. Reksicherung integrates using Airon's existing interfaces (configuration, skills, MCP servers, and run outputs); this implementation does not change Airon.
 
-The Airon run JSON is part of the audit evidence. Reksicherung must also produce structured domain evidence for backup discovery, restore, validation, and cleanup. Link the two with the Airon run ID when available. Airon performs the AI-assisted semantic review of the restored database: it inspects schema and runs bounded, read-only queries through Reksicherung tools. Reksicherung owns restore lifecycle and computes the final run result from the required deterministic checks and the structured AI-review result.
+The Airon run JSON is part of the audit evidence. Reksicherung must also produce structured domain evidence for backup discovery, restore, validation, and cleanup. Airon's generated run ID is not automatically included in MCP tool calls, so Reksicherung creates and returns its own run ID and treats any Airon run ID as optional correlation metadata supplied by the workflow. Airon performs the AI-assisted semantic review of the restored database: it inspects schema and runs bounded, read-only queries through Reksicherung tools. Reksicherung owns restore lifecycle and computes the final run result from the required deterministic checks and the structured AI-review result.
 
-One high-level restore-check job may contain several constrained tool calls/phases; it does not require embedding an LLM in Reksicherung or changing Airon.
+One high-level restore-check job may contain several constrained tool calls/phases; it does not require embedding an LLM in Reksicherung or changing Airon. Airon executes configured prompts and model-requested tool calls, not a guaranteed fixed sequence of domain operations. Reksicherung must therefore expose explicit stateful operations and must not assume a later Airon cleanup prompt will run after a failure.
 
 ### Reksicherung
 
@@ -98,16 +98,18 @@ Implementations described in `onsite-infrastructure`, `infrastructure`, and Airo
 ## 6. Core workflow
 
 1. **Discover:** Catalog generation reads the canonical Reksicherung configuration and relevant generated backup configuration/artifacts. It emits an inventory of backup sources, repositories, databases, and supported checks for Airon.
-2. **Plan:** Airon starts a configured run and assigns a run ID. Project-specific prompt instructions may define which databases to check, whether all or only selected databases are required, and whether checks must be sequential or may run in any order. Airon turns those instructions into an explicit run plan; Reksicherung validates and records the plan before starting any restore.
+2. **Plan:** Reksicherung creates its own run ID. Project-specific prompt instructions may define which databases to check, whether all or only selected databases are required, and whether checks must be sequential or may run in any order. Airon turns those instructions into an explicit run plan; Reksicherung validates and records the plan before starting any restore. An Airon run ID may be recorded separately if supplied.
 3. **Preflight:** Reksicherung validates configuration, resolves secret references, checks required tool availability, and confirms the target environment can be created. No restore is attempted if required preflight checks fail.
 4. **Prepare:** Create a uniquely named, per-run SQL Server restore container/environment with bounded resources and no connection to the production database network.
 5. **Fetch and restore:** Read the selected backup through the relevant GoBackup or Restic integration and shared storage layer, then restore it into the temporary SQL Server environment.
 6. **Validate:** Run database integrity checks. Airon inspects the restored schema and uses restricted SQL Server tools to issue bounded, read-only `SELECT` queries to assess whether relevant tables contain data and whether the observed data is plausible for the project. Record the schema context, queries, sanitized/aggregated results, and structured AI assessment.
 7. **Decide:** Airon returns a structured semantic-check result with evidence. Reksicherung aggregates it with deterministic restore/integrity results to compute the authoritative `PASS`, `FAIL`, or `INCONCLUSIVE` verdict. The AI cannot override a failed required check or mark an unrun required check as passed.
-8. **Finalize:** In normal mode, delete the restored database and stop/remove the temporary environment. In human-review mode, retain them and report how to inspect and later remove them.
+8. **Finalize:** In normal mode, delete the restored database and stop/remove the temporary environment. In human-review mode, retain them and report how to inspect and later remove them. Reksicherung persists run state and provides a reconciliation/lease mechanism so interrupted or abandoned runs can be cleaned without depending on Airon reaching a final cleanup call; held-for-review runs are exempt until explicit operator cleanup or configured expiry.
 9. **Record:** Write structured Reksicherung evidence and preserve the corresponding Airon JSON run log, linked by run ID.
 
 All started operations should have explicit states and timestamps. Cancellation, timeout, restore failure, validation failure, and cleanup failure must be represented in the final result and evidence rather than silently discarded.
+
+Run lifecycle operations must be idempotent and recoverable after Reksicherung or Airon restarts. The initial integration should use a long-lived Reksicherung service over streamable HTTP MCP (or an equivalent persistent service boundary), rather than relying on a short-lived Airon-spawned process to own temporary containers. A local CLI may also be provided for administration and development.
 
 ## 7. Configuration and generators
 
@@ -133,6 +135,7 @@ The exact YAML schema and versioning policy are open design items; examples in t
 - Do not copy the `onsite-infrastructure/util/configgen` implementation as the generator source.
 - Generate the simplified GoBackup YAML/configuration from canonical project configuration, with secrets represented only by references or runtime environment bindings.
 - Validate generated output and make generation deterministic where practical.
+- Account for GoBackup's SQL Server plugin producing `.bacpac` exports via SqlPackage: the restore workflow must import the artifact into the isolated SQL Server using a compatible SqlPackage execution environment, not treat the artifact as a native SQL Server `.bak`.
 
 ### Restic generator
 
@@ -321,12 +324,12 @@ The initial design does not require cryptographic evidence signing or encrypted 
 ## 18. Open decisions before implementation
 
 - Final canonical YAML schema and version-compatibility policy.
-- Exact Airon-to-Reksicherung invocation boundary: MCP tool, CLI/wrapper, or both.
+- Run-registry storage choice, lease/expiry policy, and reconciliation interval for abandoned temporary environments.
 - OpenBao operational model and proof of concept: deployment footprint, initialization/unseal, authentication, persistence, backup, and recovery.
 - Secret-reference syntax and credential renewal/rotation behavior.
 - Image build/distribution policy and exact isolation controls.
 - Supported S3-compatible implementations and required object-store operations.
-- Exact run-plan fields and how prompt instructions map to scope, required coverage, order/concurrency, and error handling.
+- Exact run-plan fields and how prompt instructions map to scope, order/concurrency, and error handling.
 - Backup selection policy: newest, scheduled point, explicit ID, or a configurable combination.
 - SQL Server database licensing/configuration and supported image architecture.
 - Default `DBCC CHECKDB` options, timeout, and resource limits.
