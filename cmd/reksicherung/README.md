@@ -16,6 +16,9 @@ reference in each inventory entry; by default it uses the configuration
 file's basename. Use `-production` to require restore images pinned by sha256
 digest; the example is intentionally configured for local development with a
 mutable image tag.
-Restore execution and operator cleanup commands will be added with the
-long-running Reksicherung service and MCP integration; the CLI does not yet
-start containers or restore backups.
+
+`cleanup -registry <runs.db> -run-id <id>` removes a container retained by a
+`hold_for_review` run. The command records its cleanup attempt before invoking
+the idempotent Podman removal, so it can be retried after interruption.
+Restore execution and MCP integration are still in progress; the CLI does not
+yet start or restore backups.

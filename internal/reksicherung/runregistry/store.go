@@ -233,10 +233,15 @@ func validateUpdate(current, next Record) error {
 	canFinishWithCleanup := next.Status == StatusFinished &&
 		next.Verdict != VerdictUnknown &&
 		(next.CleanupStatus == CleanupSucceeded || next.CleanupStatus == CleanupRetained || next.CleanupStatus == CleanupNotRequired)
+	canStartHeldCleanup := current.Status == StatusFinished &&
+		current.CleanupMode == CleanupHold &&
+		current.CleanupStatus == CleanupRetained &&
+		next.Status == StatusFinalizing &&
+		next.CleanupStatus == CleanupInProgress
 	if next.Status == StatusFinished && !canFinishWithCleanup {
 		return fmt.Errorf("%w: finished run requires a verdict and completed or retained cleanup", ErrInvalidRecord)
 	}
-	if !canTransition(current.Status, next.Status) && !canFinishWithCleanup {
+	if !canTransition(current.Status, next.Status) && !canFinishWithCleanup && !canStartHeldCleanup {
 		return fmt.Errorf("%w: invalid status transition %q to %q", ErrInvalidRecord, current.Status, next.Status)
 	}
 	if !canTransitionCleanup(current.CleanupStatus, next.CleanupStatus) {

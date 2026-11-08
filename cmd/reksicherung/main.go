@@ -33,6 +33,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runValidate(args[1:], stdout, stderr)
 	case "catalog":
 		return runCatalog(args[1:], stdout, stderr)
+	case "cleanup":
+		return runCleanup(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -49,11 +51,13 @@ Usage:
   reksicherung validate -config <catalog.yaml>
   reksicherung validate -config <catalog.yaml> -production
   reksicherung catalog  -config <catalog.yaml> [-source-ref <relative-path>] [-production]
+  reksicherung cleanup  -registry <runs.db> -run-id <held-run>
   reksicherung help
 
 Commands:
   validate   Validate a versioned backup catalog
   catalog    Write the secret-free Airon inventory as JSON to stdout
+  cleanup    Remove a held-for-review restore container
 
 The -production flag requires restore images to be pinned by sha256 digest.`)
 }
