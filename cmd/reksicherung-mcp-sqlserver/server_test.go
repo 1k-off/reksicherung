@@ -163,7 +163,7 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 		t.Fatalf("validation output = %#v", validated)
 	}
 	if fake.validationQuery.Table.Database != "RestoredDb" ||
-		len(fake.validationQuery.Predicates) != 0 || fake.validationQuery.Limit != 2 {
+		fake.validationQuery.Limit != 2 {
 		t.Fatalf("validation request = %#v, want target-scoped bounded request", fake.validationQuery)
 	}
 

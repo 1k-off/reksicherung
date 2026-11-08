@@ -70,7 +70,6 @@ func run(ctx context.Context, getenv func(string) string, stdin, stdout *os.File
 		MaxSampleRows:    100,
 		MaxTables:        200,
 		MaxColumns:       200,
-		MaxPredicates:    8,
 	})
 	if err != nil {
 		return errors.New("could not initialize SQL Server inspection")

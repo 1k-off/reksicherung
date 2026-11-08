@@ -37,16 +37,12 @@ func TestQuoteIdentifier(t *testing.T) {
 	}
 }
 
-func TestBuildValidationSQLQuotesAndParameterizes(t *testing.T) {
+func TestBuildValidationSQLCountsRowsWithoutCallerPredicates(t *testing.T) {
 	request := ValidationQuery{
 		Table: TableRef{
 			Database: "restore]db",
 			Schema:   "dbo",
 			Table:    "orders",
-		},
-		Predicates: []Predicate{
-			{Column: "status", Operator: Equal, Value: "x'; DROP TABLE dbo.orders;--"},
-			{Column: "deleted_at", Operator: IsNull},
 		},
 		Limit: 12,
 	}
@@ -55,63 +51,29 @@ func TestBuildValidationSQLQuotesAndParameterizes(t *testing.T) {
 		t.Fatalf("buildValidationSQL() error = %v", err)
 	}
 	for _, fragment := range []string{
-		"FROM [restore]]db].[dbo].[orders] AS t",
-		"t.[status] = @p2",
-		"t.[deleted_at] IS NULL",
+		"FROM [restore]]db].[dbo].[orders]) AS bounded_sample",
 		"SELECT TOP (@p1)",
 	} {
 		if !strings.Contains(query, fragment) {
 			t.Errorf("query %q does not contain %q", query, fragment)
 		}
 	}
-	if strings.Contains(query, "DROP TABLE") || strings.Contains(query, "x';") {
-		t.Fatalf("query contains parameter data or a second statement: %q", query)
+	if strings.Contains(query, "WHERE") || strings.Contains(query, ";") {
+		t.Fatalf("query contains a predicate or a second statement: %q", query)
 	}
-	if want := []any{13, "x'; DROP TABLE dbo.orders;--"}; !reflect.DeepEqual(args, want) {
-		t.Fatalf("args = %#v, want %#v", args, want)
+	if want := []any{13}; !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %#v, want limit+1", args)
 	}
 }
 
-func TestBuildValidationSQLRejectsUnsupportedInput(t *testing.T) {
+func TestBuildValidationSQLRejectsInvalidTable(t *testing.T) {
 	base := ValidationQuery{
 		Table: TableRef{Database: "restore", Schema: "dbo", Table: "orders"},
 		Limit: 3,
 	}
-	tests := []struct {
-		name  string
-		query ValidationQuery
-	}{
-		{
-			name: "SQL fragment operator",
-			query: withPredicate(base, Predicate{
-				Column: "id", Operator: Operator("= 1; DELETE FROM orders;--"), Value: 1,
-			}),
-		},
-		{
-			name: "null value for comparison",
-			query: withPredicate(base, Predicate{
-				Column: "id", Operator: Equal, Value: nil,
-			}),
-		},
-		{
-			name: "unsupported value type",
-			query: withPredicate(base, Predicate{
-				Column: "id", Operator: Equal, Value: []byte("1"),
-			}),
-		},
-		{
-			name: "overlong string",
-			query: withPredicate(base, Predicate{
-				Column: "id", Operator: Equal, Value: strings.Repeat("x", maxStringValue+1),
-			}),
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if _, _, err := buildValidationSQL(test.query); !errors.Is(err, ErrInvalidInput) {
-				t.Fatalf("buildValidationSQL() error = %v, want ErrInvalidInput", err)
-			}
-		})
+	base.Table.Table = ""
+	if _, _, err := buildValidationSQL(base); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("buildValidationSQL() error = %v, want ErrInvalidInput", err)
 	}
 	if _, err := New(nil, Options{}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("New(nil) error = %v, want ErrInvalidInput", err)
@@ -160,9 +122,8 @@ func TestServiceBoundsMetadataAndReturnsAggregateOnly(t *testing.T) {
 	}
 
 	result, err := service.Validate(context.Background(), ValidationQuery{
-		Table:      ref,
-		Predicates: []Predicate{{Column: "status", Operator: Equal, Value: "ready"}},
-		Limit:      2,
+		Table: ref,
+		Limit: 2,
 	})
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
@@ -175,38 +136,32 @@ func TestServiceBoundsMetadataAndReturnsAggregateOnly(t *testing.T) {
 			t.Errorf("query projects row data: %q", call.query)
 		}
 	}
-	if got := fake.calls[len(fake.calls)-1].args; !reflect.DeepEqual(got, []any{3, "ready"}) {
-		t.Fatalf("validation args = %#v, want limit+1 and bound predicate", got)
+	if got := fake.calls[len(fake.calls)-1].args; !reflect.DeepEqual(got, []any{3}) {
+		t.Fatalf("validation args = %#v, want only limit+1", got)
 	}
 }
 
-func TestValidateRejectsUnknownColumnAndPredicateOverflow(t *testing.T) {
+func TestValidateRejectsCrossDatabaseAndInvalidLimitBeforeQuery(t *testing.T) {
 	fake := &fakeQueryer{}
-	service, err := newService(fake, Options{TargetDatabase: "restore", MaxPredicates: 1})
+	service, err := newService(fake, Options{TargetDatabase: "restore"})
 	if err != nil {
 		t.Fatalf("newService() error = %v", err)
 	}
 	ref := TableRef{Database: "restore", Schema: "dbo", Table: "orders"}
 	_, err = service.Validate(context.Background(), ValidationQuery{
-		Table: ref, Limit: 1, Predicates: []Predicate{{Column: "private", Operator: IsNotNull}},
+		Table: TableRef{Database: "master", Schema: "dbo", Table: "orders"}, Limit: 1,
 	})
 	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("Validate() unknown column error = %v, want ErrInvalidInput", err)
+		t.Fatalf("Validate() cross-database error = %v, want ErrInvalidInput", err)
 	}
-	queriesAfterUnknownColumn := len(fake.calls)
 	_, err = service.Validate(context.Background(), ValidationQuery{
-		Table: ref,
-		Limit: 1,
-		Predicates: []Predicate{
-			{Column: "status", Operator: IsNotNull},
-			{Column: "id", Operator: IsNotNull},
-		},
+		Table: ref, Limit: 0,
 	})
 	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("Validate() excess predicates error = %v, want ErrInvalidInput", err)
+		t.Fatalf("Validate() invalid limit error = %v, want ErrInvalidInput", err)
 	}
-	if len(fake.calls) != queriesAfterUnknownColumn {
-		t.Fatal("excess predicates reached the database")
+	if len(fake.calls) != 0 {
+		t.Fatal("invalid validation request reached the database")
 	}
 }
 
@@ -322,11 +277,6 @@ func TestDatabaseErrorsAreRedactedAndDeadlinesClassified(t *testing.T) {
 	if !errors.Is(err, ErrCanceled) {
 		t.Fatalf("ListTables() cancellation error = %v, want ErrCanceled", err)
 	}
-}
-
-func withPredicate(query ValidationQuery, predicate Predicate) ValidationQuery {
-	query.Predicates = []Predicate{predicate}
-	return query
 }
 
 type queryCall struct {

@@ -79,9 +79,8 @@ func TestSQLServerLoopbackFixture(t *testing.T) {
 		t.Fatal("SQL Server service did not inspect the dummy fixture schema")
 	}
 	result, err := service.Validate(ctx, ValidationQuery{
-		Table:      ref,
-		Predicates: []Predicate{{Column: "status", Operator: Equal, Value: "fixture-ok"}},
-		Limit:      1,
+		Table: ref,
+		Limit: 1,
 	})
 	if err != nil || result != (ValidationResult{ObservedRows: 1, Limit: 1, Truncated: true}) {
 		t.Fatal("SQL Server service did not return the bounded dummy-fixture aggregate")

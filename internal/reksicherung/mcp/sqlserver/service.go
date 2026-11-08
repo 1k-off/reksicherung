@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -30,14 +29,11 @@ const (
 	defaultIntegrityTimeout = 5 * time.Minute
 	defaultSampleLimit      = 100
 	defaultMetadataCap      = 500
-	defaultPredicateCap     = 8
 
 	hardQueryTimeout     = 2 * time.Minute
 	hardIntegrityTimeout = 30 * time.Minute
 	hardSampleLimit      = 1000
 	hardMetadataCap      = 5000
-	hardPredicateCap     = 16
-	maxStringValue       = 4096
 	integrityCheckMaxDOP = 2
 )
 
@@ -51,7 +47,6 @@ type Options struct {
 	MaxSampleRows    int
 	MaxTables        int
 	MaxColumns       int
-	MaxPredicates    int
 }
 
 // TableRef identifies a table using SQL Server database, schema, and table
@@ -93,37 +88,11 @@ type TableDescription struct {
 	Truncated bool
 }
 
-// Operator is the small set of predicates the validation API can express.
-// SQL text, expressions, joins, subqueries, and statements are not accepted.
-type Operator string
-
-const (
-	Equal        Operator = "eq"
-	NotEqual     Operator = "ne"
-	LessThan     Operator = "lt"
-	LessOrEqual  Operator = "le"
-	GreaterThan  Operator = "gt"
-	GreaterEqual Operator = "ge"
-	Like         Operator = "like"
-	NotLike      Operator = "not_like"
-	IsNull       Operator = "is_null"
-	IsNotNull    Operator = "is_not_null"
-)
-
-// Predicate compares a column with a parameter. Value is ignored for the
-// null-check operators and required for all other operators.
-type Predicate struct {
-	Column   string
-	Operator Operator
-	Value    any
-}
-
-// ValidationQuery counts only matching rows, up to Limit+1. It deliberately
-// cannot project or return row-level values.
+// ValidationQuery counts rows in a table, up to Limit+1. It deliberately
+// accepts no caller-supplied predicates and cannot return row-level values.
 type ValidationQuery struct {
-	Table      TableRef
-	Predicates []Predicate
-	Limit      int
+	Table TableRef
+	Limit int
 }
 
 // ValidationResult contains only bounded aggregate information. If Truncated
@@ -219,15 +188,11 @@ func normalizeOptions(options Options) (Options, error) {
 	if options.MaxColumns == 0 {
 		options.MaxColumns = defaultMetadataCap
 	}
-	if options.MaxPredicates == 0 {
-		options.MaxPredicates = defaultPredicateCap
-	}
 	if options.QueryTimeout < time.Millisecond || options.QueryTimeout > hardQueryTimeout ||
 		options.IntegrityTimeout < time.Millisecond || options.IntegrityTimeout > hardIntegrityTimeout ||
 		options.MaxSampleRows < 1 || options.MaxSampleRows > hardSampleLimit ||
 		options.MaxTables < 1 || options.MaxTables > hardMetadataCap ||
-		options.MaxColumns < 1 || options.MaxColumns > hardMetadataCap ||
-		options.MaxPredicates < 1 || options.MaxPredicates > hardPredicateCap {
+		options.MaxColumns < 1 || options.MaxColumns > hardMetadataCap {
 		return Options{}, ErrInvalidInput
 	}
 	return options, nil
@@ -306,8 +271,7 @@ func (s *Service) Validate(ctx context.Context, request ValidationQuery) (Valida
 	if ctx == nil {
 		return ValidationResult{}, ErrInvalidInput
 	}
-	if request.Limit < 1 || request.Limit > s.options.MaxSampleRows ||
-		len(request.Predicates) > s.options.MaxPredicates {
+	if request.Limit < 1 || request.Limit > s.options.MaxSampleRows {
 		return ValidationResult{}, ErrInvalidInput
 	}
 	if request.Table.Database != s.options.TargetDatabase {
@@ -316,27 +280,8 @@ func (s *Service) Validate(ctx context.Context, request ValidationQuery) (Valida
 	if _, _, err := quoteTable(request.Table); err != nil {
 		return ValidationResult{}, ErrInvalidInput
 	}
-	for _, predicate := range request.Predicates {
-		if err := validatePredicate(predicate); err != nil {
-			return ValidationResult{}, err
-		}
-	}
 	ctx, cancel := context.WithTimeout(ctx, s.options.QueryTimeout)
 	defer cancel()
-
-	description, err := s.describeTable(ctx, request.Table)
-	if err != nil {
-		return ValidationResult{}, err
-	}
-	columns := make(map[string]struct{}, len(description.Columns))
-	for _, column := range description.Columns {
-		columns[column.Name] = struct{}{}
-	}
-	for _, predicate := range request.Predicates {
-		if _, ok := columns[predicate.Column]; !ok {
-			return ValidationResult{}, ErrInvalidInput
-		}
-	}
 
 	query, args, err := buildValidationSQL(request)
 	if err != nil {
@@ -450,34 +395,9 @@ func buildValidationSQL(request ValidationQuery) (string, []any, error) {
 	if err != nil {
 		return "", nil, ErrInvalidInput
 	}
-	args := make([]any, 0, 1+len(request.Predicates))
-	args = append(args, request.Limit+1)
-	where := make([]string, 0, len(request.Predicates))
-	for _, predicate := range request.Predicates {
-		column, err := quoteIdentifier(predicate.Column)
-		if err != nil {
-			return "", nil, ErrInvalidInput
-		}
-		operator, needsValue, err := sqlOperator(predicate.Operator)
-		if err != nil {
-			return "", nil, err
-		}
-		expression := "t." + column + " " + operator
-		if needsValue {
-			if err := validateValue(predicate.Value); err != nil {
-				return "", nil, err
-			}
-			args = append(args, predicate.Value)
-			expression += fmt.Sprintf(" @p%d", len(args))
-		}
-		where = append(where, expression)
-	}
+	args := []any{request.Limit + 1}
 	query := "SELECT COUNT_BIG(*) FROM (SELECT TOP (@p1) 1 AS [sample] FROM " +
-		qualifiedTable + " AS t"
-	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
-	}
-	query += ") AS bounded_sample"
+		qualifiedTable + ") AS bounded_sample"
 	return query, args, nil
 }
 
@@ -507,69 +427,6 @@ func quoteIdentifier(identifier string) (string, error) {
 		}
 	}
 	return "[" + strings.ReplaceAll(identifier, "]", "]]") + "]", nil
-}
-
-func sqlOperator(operator Operator) (string, bool, error) {
-	switch operator {
-	case Equal:
-		return "=", true, nil
-	case NotEqual:
-		return "<>", true, nil
-	case LessThan:
-		return "<", true, nil
-	case LessOrEqual:
-		return "<=", true, nil
-	case GreaterThan:
-		return ">", true, nil
-	case GreaterEqual:
-		return ">=", true, nil
-	case Like:
-		return "LIKE", true, nil
-	case NotLike:
-		return "NOT LIKE", true, nil
-	case IsNull:
-		return "IS NULL", false, nil
-	case IsNotNull:
-		return "IS NOT NULL", false, nil
-	default:
-		return "", false, ErrInvalidInput
-	}
-}
-
-func validatePredicate(predicate Predicate) error {
-	if _, err := quoteIdentifier(predicate.Column); err != nil {
-		return ErrInvalidInput
-	}
-	_, needsValue, err := sqlOperator(predicate.Operator)
-	if err != nil {
-		return err
-	}
-	if needsValue {
-		return validateValue(predicate.Value)
-	}
-	return nil
-}
-
-func validateValue(value any) error {
-	switch value := value.(type) {
-	case string:
-		if len(value) > maxStringValue {
-			return ErrInvalidInput
-		}
-	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, time.Time:
-		return nil
-	case float32:
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return ErrInvalidInput
-		}
-	case float64:
-		if math.IsNaN(value) || math.IsInf(value, 0) {
-			return ErrInvalidInput
-		}
-	default:
-		return ErrInvalidInput
-	}
-	return nil
 }
 
 func classifyError(ctx context.Context, err error) error {
