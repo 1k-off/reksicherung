@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/1k-off/reksicherung/internal/reksicherung/plan"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 	"gopkg.in/yaml.v3"
 )
@@ -118,6 +119,9 @@ func (catalog Catalog) Validate() error {
 	}
 	if len(catalog.Backups) == 0 {
 		return errors.New("catalog must define at least one backup")
+	}
+	if len(catalog.Backups) > plan.MaxSelectedDatabases {
+		return fmt.Errorf("catalog exceeds the %d backup source limit", plan.MaxSelectedDatabases)
 	}
 
 	ids := make(map[string]struct{}, len(catalog.Backups))

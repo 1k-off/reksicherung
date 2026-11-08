@@ -13,6 +13,14 @@ import (
 	"strings"
 )
 
+const (
+	// MaxSelectedDatabases bounds the size of one restore-check run and its
+	// structured result.
+	MaxSelectedDatabases = 64
+	// MaxParallelism bounds per-run concurrency even for untrusted plans.
+	MaxParallelism = 64
+)
+
 // Selection describes the databases a run will check. Set All to select every
 // database in the inventory; otherwise DatabaseIDs must list one or more IDs.
 // The two forms are mutually exclusive.
@@ -81,6 +89,9 @@ func (p RunPlan) Normalize(inventory []string) (RunPlan, error) {
 	if p.MaxParallelism < 1 {
 		return RunPlan{}, fmt.Errorf("max parallelism must be positive, got %d", p.MaxParallelism)
 	}
+	if p.MaxParallelism > MaxParallelism {
+		return RunPlan{}, fmt.Errorf("max parallelism exceeds limit %d", MaxParallelism)
+	}
 	if p.Ordering == Sequential && p.MaxParallelism != 1 {
 		return RunPlan{}, fmt.Errorf("sequential ordering requires max parallelism 1, got %d", p.MaxParallelism)
 	}
@@ -118,6 +129,9 @@ func (p RunPlan) Normalize(inventory []string) (RunPlan, error) {
 
 	if len(selected) == 0 {
 		return RunPlan{}, fmt.Errorf("database selection resolves to no inventory targets")
+	}
+	if len(selected) > MaxSelectedDatabases {
+		return RunPlan{}, fmt.Errorf("selected databases exceed limit %d", MaxSelectedDatabases)
 	}
 	normalized := p
 	normalized.Selection = Selection{DatabaseIDs: selected}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/1k-off/reksicherung/internal/reksicherung/plan"
 )
 
 const validCatalogYAML = `apiVersion: reksicherung.io/v1alpha1
@@ -59,6 +61,22 @@ func TestDecodeRepositoryExampleCatalog(t *testing.T) {
 	}
 	if _, err := Decode(data); err != nil {
 		t.Fatalf("Decode(example) error = %v", err)
+	}
+}
+
+func TestCatalogRejectsMoreSourcesThanRunLimit(t *testing.T) {
+	catalog, err := Decode([]byte(validCatalogYAML))
+	if err != nil {
+		t.Fatalf("Decode(valid catalog) error = %v", err)
+	}
+	source := catalog.Backups[0]
+	catalog.Backups = make([]BackupSource, plan.MaxSelectedDatabases+1)
+	for index := range catalog.Backups {
+		catalog.Backups[index] = source
+		catalog.Backups[index].ID = "database-" + strings.Repeat("x", index+1)
+	}
+	if err := catalog.Validate(); err == nil || !strings.Contains(err.Error(), "backup source limit") {
+		t.Fatalf("Validate() error = %v, want source limit error", err)
 	}
 }
 

@@ -187,6 +187,24 @@ func TestRunPlanNormalizeSelection(t *testing.T) {
 	}
 }
 
+func TestRunPlanEnforcesRunAndConcurrencyLimits(t *testing.T) {
+	inventory := make([]string, MaxSelectedDatabases+1)
+	for i := range inventory {
+		inventory[i] = "database-" + strings.Repeat("x", i+1)
+	}
+	allTargets := validPlan(Selection{All: true})
+	if _, err := allTargets.Normalize(inventory); err == nil || !strings.Contains(err.Error(), "selected databases exceed limit") {
+		t.Fatalf("Normalize(all targets) error = %v, want selected database limit error", err)
+	}
+
+	excessiveConcurrency := validPlan(Selection{DatabaseIDs: []string{"db-a"}})
+	excessiveConcurrency.Ordering = Any
+	excessiveConcurrency.MaxParallelism = MaxParallelism + 1
+	if _, err := excessiveConcurrency.Normalize([]string{"db-a"}); err == nil || !strings.Contains(err.Error(), "max parallelism exceeds limit") {
+		t.Fatalf("Normalize(excessive concurrency) error = %v, want parallelism limit error", err)
+	}
+}
+
 func TestRunPlanNormalizeRejectsInvalidPolicies(t *testing.T) {
 	tests := []struct {
 		name      string
