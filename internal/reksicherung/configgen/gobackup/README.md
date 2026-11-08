@@ -17,19 +17,20 @@ Supported behavior:
 - Simple and enhanced daily/weekly/monthly schedules, retention defaults,
   healthchecks, model names, storage names, and object path prefixes.
 - S3, MinIO, and SFTP storage configuration.
-- MSSQL, PostgreSQL, and MySQL database sources, including MSSQL certificate
-  trust defaults and the `ignore_schema_check` argument mapping.
-- File archives, compression, OpenSSL encryption, before/after scripts,
+- MSSQL, PostgreSQL, and MySQL database sources, including certificate
+  verification by default and the `ignore_schema_check` argument mapping.
+- File archives, compression, and OpenSSL encryption,
   healthchecks notifier switches, and GoBackup's web bind configuration.
 
 Not supported here: host or Docker deployment generation (including Compose,
 systemd units, mounts, and env files), batch manifests/config directories,
 `.env` loading or generation-time environment expansion, output-file writing,
 legacy deployment/output options, arbitrary database types, and custom notifier
-implementations. Configure runtime environment variables from the returned
-binding manifest in the Reksicherung launcher.
+implementations. Unrestricted scripts and free-form database arguments are
+deliberately excluded because they can execute arbitrary commands or smuggle
+credential material into generated configuration. Configure runtime environment
+variables from the returned binding manifest in the Reksicherung launcher.
 
-Do not put credentials in scripts, endpoint URLs, or other ordinary string
-settings. This input schema rejects credential-shaped YAML fields and rejects
-endpoint userinfo/query strings, but it cannot infer whether arbitrary script
-text or non-credential metadata contains sensitive data.
+This input schema rejects credential-shaped YAML fields and rejects endpoint
+userinfo/query strings. It does not resolve secret references and cannot infer
+whether a non-credential metadata value contains sensitive data.

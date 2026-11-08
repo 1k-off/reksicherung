@@ -149,12 +149,6 @@ func buildModel(
 			),
 		},
 	}
-	if strings.TrimSpace(input.Scripts.Before) != "" {
-		model["before_script"] = strings.TrimSpace(input.Scripts.Before)
-	}
-	if strings.TrimSpace(input.Scripts.After) != "" {
-		model["after_script"] = strings.TrimSpace(input.Scripts.After)
-	}
 	if input.Archive != nil {
 		archive := map[string]any{"includes": input.Archive.Includes}
 		if len(input.Archive.Excludes) > 0 {
@@ -232,14 +226,10 @@ func buildDatabases(databases []Database, bindings *binder) map[string]any {
 		if database.TrustServerCertificate != nil {
 			entry["trustServerCertificate"] = *database.TrustServerCertificate
 		} else if dbType == "mssql" {
-			entry["trustServerCertificate"] = true
+			entry["trustServerCertificate"] = false
 		}
-		args := database.Args
-		if args == "" && database.IgnoreSchemaCheck {
-			args = "/p:VerifyExtraction=false"
-		}
-		if args != "" {
-			entry["args"] = args
+		if database.IgnoreSchemaCheck {
+			entry["args"] = "/p:VerifyExtraction=false"
 		}
 		result[database.Name] = entry
 	}

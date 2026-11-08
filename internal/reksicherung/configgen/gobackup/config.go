@@ -33,7 +33,6 @@ type Input struct {
 	Archive    *Archive   `yaml:"archive,omitempty"`
 	Encryption Encryption `yaml:"encryption,omitempty"`
 	Notifiers  Notifiers  `yaml:"notifiers,omitempty"`
-	Scripts    Scripts    `yaml:"scripts,omitempty"`
 	Web        Web        `yaml:"web,omitempty"`
 }
 
@@ -82,7 +81,6 @@ type Database struct {
 	UsernameRef            string `yaml:"username_ref"`
 	PasswordRef            string `yaml:"password_ref"`
 	TrustServerCertificate *bool  `yaml:"trust_server_certificate,omitempty"`
-	Args                   string `yaml:"args,omitempty"`
 	IgnoreSchemaCheck      bool   `yaml:"ignore_schema_check,omitempty"`
 }
 
@@ -102,11 +100,6 @@ type Encryption struct {
 type Notifiers struct {
 	OnSuccess *bool `yaml:"on_success,omitempty"`
 	OnFailure *bool `yaml:"on_failure,omitempty"`
-}
-
-type Scripts struct {
-	Before string `yaml:"before,omitempty"`
-	After  string `yaml:"after,omitempty"`
 }
 
 type Web struct {

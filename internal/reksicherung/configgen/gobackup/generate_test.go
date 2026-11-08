@@ -55,6 +55,48 @@ func TestDecodeRequiresSingleStrictYAMLDocument(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsUnboundedExecutionFields(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "scripts",
+			yaml: `project: {name: test}
+storage: {type: s3, bucket: backups}
+schedules: {cron: "0 5 * * *"}
+archive: {includes: [/var/lib/app]}
+scripts: {before: "echo TEST_ONLY_SENTINEL"}
+`,
+		},
+		{
+			name: "database args",
+			yaml: `project: {name: test}
+storage: {type: s3, bucket: backups}
+schedules: {cron: "0 5 * * *"}
+databases:
+  - name: main
+    type: mssql
+    host: localhost
+    database: app
+    username_ref: ` + dbUserRef + `
+    password_ref: ` + dbPasswordRef + `
+    args: "/p:Secret=TEST_ONLY_SENTINEL"
+`,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Decode(strings.NewReader(test.yaml))
+			if err == nil {
+				t.Fatal("Decode() accepted unsupported executable configuration")
+			}
+			if strings.Contains(err.Error(), "TEST_ONLY_SENTINEL") {
+				t.Fatal("Decode() error disclosed input value")
+			}
+		})
+	}
+}
+
 func TestGenerateSimpleDefaultsS3AndMSSQLMapping(t *testing.T) {
 	input, err := Decode(strings.NewReader(`project:
   name: my-app
@@ -110,7 +152,7 @@ databases:
 	db := mapAt(t, mapAt(t, model, "databases"), "main")
 	assertEqual(t, db, "type", "mssql")
 	assertEqual(t, db, "port", 1433)
-	assertEqual(t, db, "trustServerCertificate", true)
+	assertEqual(t, db, "trustServerCertificate", false)
 	assertEqual(t, db, "args", "/p:VerifyExtraction=false")
 	assertEqual(t, db, "username", "$REKSICHERUNG_DATABASES_MAIN_USERNAME")
 	assertEqual(t, db, "password", "$REKSICHERUNG_DATABASES_MAIN_PASSWORD")
@@ -129,7 +171,48 @@ databases:
 	})
 }
 
-func TestGenerateEnhancedArchiveEncryptionScriptsAndNotifiers(t *testing.T) {
+func TestMSSQLCertificateTrustRequiresExplicitOptIn(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		trustField    string
+		wantTrustFlag bool
+	}{
+		{name: "secure default", wantTrustFlag: false},
+		{name: "explicit trust opt in", trustField: "    trust_server_certificate: true\n", wantTrustFlag: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			inputYAML := `project:
+  name: mssql-project
+storage:
+  type: s3
+  bucket: backups
+schedules:
+  cron: "0 5 * * *"
+  healthcheck_url_ref: ` + healthRef + `
+databases:
+  - name: main
+    type: mssql
+    host: sql.example.test
+    database: app
+    username_ref: ` + dbUserRef + `
+    password_ref: ` + dbPasswordRef + `
+` + test.trustField
+			input, err := Decode(strings.NewReader(inputYAML))
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			result, err := Generate(input)
+			if err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			model := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "models"), "mssql_project_default")
+			database := mapAt(t, mapAt(t, model, "databases"), "main")
+			assertEqual(t, database, "trustServerCertificate", test.wantTrustFlag)
+		})
+	}
+}
+
+func TestGenerateEnhancedArchiveEncryptionAndNotifiers(t *testing.T) {
 	input := Input{
 		Project: Project{Name: "service-name"},
 		Mode:    ModeEnhanced,
@@ -149,7 +232,6 @@ func TestGenerateEnhancedArchiveEncryptionScriptsAndNotifiers(t *testing.T) {
 		},
 		Encryption: Encryption{Enabled: true, PasswordRef: "openbao://secret/reksicherung/encryption#password"},
 		Notifiers:  Notifiers{OnSuccess: boolPointer(false)},
-		Scripts:    Scripts{Before: "  stop-app  ", After: " start-app\n"},
 	}
 	if err := input.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
@@ -171,8 +253,6 @@ func TestGenerateEnhancedArchiveEncryptionScriptsAndNotifiers(t *testing.T) {
 		assertEqual(t, archive, "includes", []any{"/var/lib/app", "/etc/app.yml"})
 		assertEqual(t, archive, "excludes", []any{"/var/lib/app/tmp"})
 		assertEqual(t, mapAt(t, model, "compress_with"), "type", "tgz")
-		assertEqual(t, model, "before_script", "stop-app")
-		assertEqual(t, model, "after_script", "start-app")
 		encrypt := mapAt(t, model, "encrypt_with")
 		assertEqual(t, encrypt, "type", "openssl")
 		assertEqual(t, encrypt, "password", "$REKSICHERUNG_ENCRYPTION_PASSWORD")
