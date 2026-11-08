@@ -7,9 +7,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -95,15 +97,56 @@ func loadConfig(getenv func(string) string) (serverConfig, error) {
 // target. It intentionally never includes the DSN in an error.
 func dsnSelectsDatabase(dsn, target string) bool {
 	parsed, err := url.Parse(dsn)
-	if err != nil || parsed.Scheme != "sqlserver" || parsed.Hostname() == "" {
+	if err != nil || parsed.Scheme != "sqlserver" || parsed.Hostname() == "" ||
+		parsed.Path != "" || parsed.Fragment != "" {
 		return false
 	}
 	query, err := url.ParseQuery(parsed.RawQuery)
 	if err != nil {
 		return false
 	}
-	values := query["database"]
-	return len(values) == 1 && values[0] == target
+	database, ok := singleQueryValue(query, "database")
+	if !ok || database != target {
+		return false
+	}
+	if isLoopbackSQLHost(parsed.Hostname()) {
+		return true
+	}
+	encrypt, ok := singleQueryValue(query, "encrypt")
+	if !ok || (!strings.EqualFold(encrypt, "true") && !strings.EqualFold(encrypt, "strict")) {
+		return false
+	}
+	trustServerCertificate, present, ok := optionalSingleQueryValue(query, "trustservercertificate")
+	return ok && (!present || strings.EqualFold(trustServerCertificate, "false"))
+}
+
+func singleQueryValue(values url.Values, key string) (string, bool) {
+	value, present, ok := optionalSingleQueryValue(values, key)
+	return value, present && ok
+}
+
+func optionalSingleQueryValue(values url.Values, key string) (string, bool, bool) {
+	var value string
+	present := false
+	for name, entries := range values {
+		if !strings.EqualFold(name, key) {
+			continue
+		}
+		if present || len(entries) != 1 {
+			return "", false, false
+		}
+		present = true
+		value = entries[0]
+	}
+	return value, present, true
+}
+
+func isLoopbackSQLHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	address := net.ParseIP(host)
+	return address != nil && address.IsLoopback()
 }
 
 func serve(ctx context.Context, service inspectionService, database string, stdin, stdout *os.File) error {

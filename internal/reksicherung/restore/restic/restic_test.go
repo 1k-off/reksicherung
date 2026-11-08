@@ -131,7 +131,7 @@ func TestOpenBackupFileRejectsUnsafePathBeforeRunning(t *testing.T) {
 
 	for _, backupPath := range []string{
 		"", "relative.bak", "/var/backups/../outside.bak",
-		"/var/backups/*.bak", "/var/backups/[db].bak", "/var/backups/db.bacpac",
+		"/var/backups/*.bak", "/var/backups/[db].bak", "/var/backups/",
 	} {
 		runner := &fakeRunner{}
 		client := newTestClient(t, runner)
@@ -141,6 +141,28 @@ func TestOpenBackupFileRejectsUnsafePathBeforeRunning(t *testing.T) {
 		if len(runner.invocations) != 0 {
 			t.Errorf("OpenBackupFile(path %q) ran %d commands", backupPath, len(runner.invocations))
 		}
+	}
+}
+
+func TestOpenBackupFileAcceptsArchiveExtensions(t *testing.T) {
+	t.Parallel()
+	for _, backupPath := range []string{
+		"/var/backups/database.bak.zip",
+		"/var/backups/nested/backup.tar.gz",
+		"/var/backups/database.bacpac",
+	} {
+		t.Run(backupPath, func(t *testing.T) {
+			runner := &fakeRunner{responses: [][]byte{
+				[]byte("restic"), []byte(snapshotsJSON),
+				[]byte(strings.ReplaceAll(backupFileNodeJSON, "/var/backups/sql server/db.bak", backupPath)),
+			}}
+			client := newTestClient(t, runner)
+			_, stream, err := client.OpenBackupFile(context.Background(), Selection{Policy: SelectionLatest}, backupPath)
+			if err != nil {
+				t.Fatalf("OpenBackupFile() error = %v", err)
+			}
+			_ = stream.Close()
+		})
 	}
 }
 

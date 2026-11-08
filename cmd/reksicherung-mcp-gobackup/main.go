@@ -9,16 +9,25 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	gobackup "github.com/1k-off/reksicherung/internal/reksicherung/mcp/gobackup"
+	"github.com/1k-off/reksicherung/internal/reksicherung/restore/artifact"
+	"github.com/1k-off/reksicherung/internal/reksicherung/restore/staging"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets/openbao"
 	"github.com/1k-off/reksicherung/internal/reksicherung/storage/s3"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const maxMCPFrameBytes = 64 * 1024
+const (
+	maxMCPFrameBytes        = 64 * 1024
+	artifactStageDirEnv     = "REKSICHERUNG_ARTIFACT_STAGE_DIR"
+	artifactMaxBytesEnv     = "REKSICHERUNG_ARTIFACT_MAX_BYTES"
+	defaultArtifactMaxBytes = int64(200 << 30)
+	hardArtifactMaxBytes    = int64(1 << 40)
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -43,20 +52,39 @@ func run(ctx context.Context, getenv func(string) string, stdin io.ReadCloser, s
 	if err != nil {
 		return err
 	}
+	maxBytes := defaultArtifactMaxBytes
+	if value := getenv(artifactMaxBytesEnv); value != "" {
+		maxBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || maxBytes < 1 || maxBytes > hardArtifactMaxBytes {
+			return errors.New("invalid configured artifact size limit")
+		}
+	}
+	stageDirectory := getenv(artifactStageDirEnv)
+	artifactStore, err := staging.New(stageDirectory, maxBytes)
+	if err != nil {
+		return errors.New("could not initialize configured artifact staging directory")
+	}
 	service, err := gobackup.New(store, gobackup.Config{
-		Prefix:     config.prefix,
-		PageSize:   100,
-		MaxBackups: 1000,
-		MaxPages:   10,
+		Prefix:         config.prefix,
+		PageSize:       100,
+		MaxBackups:     1000,
+		MaxPages:       10,
+		MaxObjectBytes: maxBytes,
 	})
 	if err != nil {
 		return errors.New("could not initialize GoBackup archive discovery")
 	}
-	return serve(ctx, service, stdin, stdout)
+	stager, err := newBackupStager(service, artifactStore, artifact.Limits{
+		MaxInputBytes: maxBytes, MaxExpandedBytes: maxBytes, MaxTemporaryBytes: maxBytes,
+	})
+	if err != nil {
+		return errors.New("could not initialize GoBackup artifact staging")
+	}
+	return serve(ctx, service, stager, stdin, stdout)
 }
 
-func serve(ctx context.Context, service archiveService, stdin io.ReadCloser, stdout io.WriteCloser) error {
-	server := newMCPServer(service)
+func serve(ctx context.Context, service archiveService, stager stagingService, stdin io.ReadCloser, stdout io.WriteCloser) error {
+	server := newMCPServer(service, stager)
 	if err := server.Run(ctx, &mcp.IOTransport{
 		Reader: newBoundedFrameReader(stdin, maxMCPFrameBytes),
 		Writer: stdout,

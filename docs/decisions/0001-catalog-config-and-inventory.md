@@ -21,9 +21,9 @@ explicit backup-ID selection, S3-compatible storage, SQL Server, and either
 
 AI semantic review is opt-in per source using `validation.semanticReview`.
 Optional `validation.expectedEmptyTables` annotations are serialized for that
-review and require semantic review to be enabled. Production validation also
-requires a sha256-pinned restore image; development validation allows a mutable
-tag for local and integration use.
+review and require semantic review to be enabled. Production validation requires HTTPS for explicitly configured remote storage
+endpoints. Restore service images, resources, and network policy are selected
+and enforced by the operator's deployment; Reksicherung does not launch them.
 
 Airon receives a separate compact JSON inventory generated from the validated
 catalog. Inventory IDs are sorted for reproducibility. The inventory excludes
@@ -49,8 +49,8 @@ relative `sourceLocation` reference such as `configs/catalog.yaml#backups/app`.
   GoBackup generation input remains provider-specific until its fields can be
   reconciled with the catalog without losing schedules, file sources, or
   generator-only options.
-- Production deployments must pin restore images by digest even though
-  development and integration examples use the requested `2022-latest` tag.
+- Operators should pin and review deployment images according to their own
+  release policy; the catalog CLI does not launch or select service images.
 - `catalog` inventory generation requires a caller-supplied stable relative
   source reference; the CLI defaults it to the catalog file's basename to avoid
   leaking machine-specific absolute paths.

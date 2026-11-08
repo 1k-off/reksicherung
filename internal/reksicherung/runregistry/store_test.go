@@ -56,7 +56,7 @@ func TestStoreUpdateEnforcesTransitionsAndCompareAndSwap(t *testing.T) {
 
 	preparing, err := store.Update(context.Background(), created.ID, created.Revision, func(record *Record) error {
 		record.Status = StatusPreparing
-		record.ContainerID = "container-123"
+		record.DatabaseName = "reksicherung_abc"
 		return nil
 	})
 	if err != nil {
@@ -84,11 +84,11 @@ func TestStoreUpdateEnforcesTransitionsAndCompareAndSwap(t *testing.T) {
 	}
 
 	_, err = store.Update(context.Background(), preparing.ID, preparing.Revision, func(record *Record) error {
-		record.ContainerID = "different-container"
+		record.DatabaseName = "reksicherung_other"
 		return nil
 	})
 	if !errors.Is(err, ErrInvalidRecord) {
-		t.Fatalf("container ID mutation error = %v, want ErrInvalidRecord", err)
+		t.Fatalf("database name mutation error = %v, want ErrInvalidRecord", err)
 	}
 }
 
@@ -103,7 +103,7 @@ func TestStoreUpdateAllowsValidRunAndCleanupLifecycle(t *testing.T) {
 	}
 	record = updateRecord(t, store, record, func(record *Record) {
 		record.Status = StatusPreparing
-		record.ContainerID = "container-123"
+		record.DatabaseName = "reksicherung_abc"
 	})
 	record = updateRecord(t, store, record, func(record *Record) { record.Status = StatusRestoring })
 	record = updateRecord(t, store, record, func(record *Record) { record.Status = StatusValidating })
@@ -142,7 +142,7 @@ func TestListExpiredIncludesOnlyAutomaticRunsWithPendingCleanup(t *testing.T) {
 		switch created.ID {
 		case "auto-a", "auto-b", "held", "cleaned":
 			created = updateRecord(t, store, created, func(record *Record) {
-				record.ContainerID = "container-" + record.ID
+				record.DatabaseName = "reksicherung_" + record.ID
 				if record.ID == "held" {
 					record.CleanupStatus = CleanupRetained
 				}

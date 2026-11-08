@@ -72,8 +72,11 @@ type Selection struct {
 	ID     string `yaml:"id,omitempty"`
 }
 
+// Restore documents operator-side restore bounds. Image is optional advisory
+// metadata for the operator-managed SQL Server service; Reksicherung never
+// pulls or launches it.
 type Restore struct {
-	Image     string `yaml:"image"`
+	Image     string `yaml:"image,omitempty"`
 	CPUMilli  int    `yaml:"cpuMilli"`
 	MemoryMiB int    `yaml:"memoryMiB"`
 	Timeout   string `yaml:"timeout"`
@@ -140,15 +143,21 @@ func (catalog Catalog) Validate() error {
 	return nil
 }
 
-// ValidateProduction applies deployment-specific checks stricter than local
-// development validation, including immutable restore image digests.
+// ValidateProduction applies deployment checks that cannot be represented by
+// local development validation. Service images and resource limits are managed
+// by the operator's deployment, not by Reksicherung.
 func (catalog Catalog) ValidateProduction() error {
 	if err := catalog.Validate(); err != nil {
 		return err
 	}
 	for i, backup := range catalog.Backups {
-		if !isDigestPinned(backup.Restore.Image) {
-			return fmt.Errorf("backups[%d]: production restore image must be pinned by sha256 digest", i)
+		endpoint := backup.Storage.Endpoint
+		if endpoint == "" {
+			continue // The default AWS S3 endpoint uses HTTPS.
+		}
+		parsed, err := url.Parse(endpoint)
+		if err != nil || parsed.Scheme != "https" {
+			return fmt.Errorf("backups[%d]: production storage endpoint must use HTTPS", i)
 		}
 	}
 	return nil
@@ -212,9 +221,8 @@ func (backup BackupSource) validate() error {
 func validateResticBackupPath(value string) error {
 	if value == "" || len(value) > 4096 || !strings.HasPrefix(value, "/") ||
 		strings.TrimSpace(value) != value || path.Clean(value) != value ||
-		!strings.EqualFold(path.Ext(value), ".bak") ||
 		strings.ContainsAny(value, "\\*?[]{}\x00\r\n\t") {
-		return errors.New("backupPath must be an exact absolute .bak path without traversal or glob characters")
+		return errors.New("backupPath must be an exact absolute file path without traversal or glob characters")
 	}
 	for _, component := range strings.Split(value, "/") {
 		if component == "." || component == ".." {
@@ -288,15 +296,17 @@ func (storage S3Storage) validate() error {
 }
 
 func (restore Restore) validate() error {
-	if strings.TrimSpace(restore.Image) == "" || strings.ContainsAny(restore.Image, "\r\n\t ") {
-		return errors.New("image must be a non-empty image reference without whitespace")
-	}
-	if strings.HasPrefix(restore.Image, "-") {
-		return errors.New("image must not look like a runtime command-line option")
-	}
-	for _, r := range restore.Image {
-		if unicode.IsControl(r) {
-			return errors.New("image must be a printable image reference")
+	if restore.Image != "" {
+		if strings.TrimSpace(restore.Image) != restore.Image || strings.ContainsAny(restore.Image, "\r\n\t ") {
+			return errors.New("image must be a printable image reference without whitespace")
+		}
+		if strings.HasPrefix(restore.Image, "-") {
+			return errors.New("image must not look like a runtime command-line option")
+		}
+		for _, r := range restore.Image {
+			if unicode.IsControl(r) {
+				return errors.New("image must be a printable image reference")
+			}
 		}
 	}
 	if restore.CPUMilli < 250 || restore.CPUMilli > 16000 {
@@ -373,19 +383,6 @@ func validTableReference(table string) bool {
 			if unicode.IsControl(r) || r == '.' {
 				return false
 			}
-		}
-	}
-	return true
-}
-
-func isDigestPinned(image string) bool {
-	_, digest, found := strings.Cut(image, "@sha256:")
-	if !found || len(digest) != 64 {
-		return false
-	}
-	for _, r := range digest {
-		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
-			return false
 		}
 	}
 	return true

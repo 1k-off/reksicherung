@@ -25,6 +25,10 @@ type archiveService interface {
 	Select(context.Context, string) (gobackup.Backup, error)
 }
 
+type stagingService interface {
+	Stage(context.Context, string) (stagedArtifact, error)
+}
+
 type listArgs struct {
 	Limit int `json:"limit,omitempty" jsonschema:"Maximum number of metadata records to return (1 to 8; defaults to 8)."`
 }
@@ -33,6 +37,10 @@ type latestArgs struct{}
 
 type selectArgs struct {
 	ID string `json:"id" jsonschema:"Exact backup ID returned by list; object contents are never read."`
+}
+
+type stageArgs struct {
+	ID string `json:"id" jsonschema:"Exact backup ID returned by list or select."`
 }
 
 func (args *listArgs) UnmarshalJSON(data []byte) error {
@@ -47,6 +55,11 @@ func (args *latestArgs) UnmarshalJSON(data []byte) error {
 
 func (args *selectArgs) UnmarshalJSON(data []byte) error {
 	type input selectArgs
+	return decodeStrictJSON(data, (*input)(args))
+}
+
+func (args *stageArgs) UnmarshalJSON(data []byte) error {
+	type input stageArgs
 	return decodeStrictJSON(data, (*input)(args))
 }
 
@@ -77,7 +90,7 @@ type listOutput struct {
 	Truncated bool           `json:"truncated" jsonschema:"True when this bounded response omitted additional matching archives."`
 }
 
-func newMCPServer(service archiveService) *mcp.Server {
+func newMCPServer(service archiveService, stagingServices ...stagingService) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reksicherung-gobackup",
 		Version: "0.1.0",
@@ -135,6 +148,29 @@ func newMCPServer(service archiveService) *mcp.Server {
 		}
 		return nil, toBackupOutput(backup), nil
 	})
+
+	if len(stagingServices) != 0 && stagingServices[0] != nil {
+		destructive, idempotent, openWorld := false, false, true
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "gobackup_stage_artifact",
+			Description: "Read the exact selected GoBackup object, resolve nested ZIP/tar/gzip wrappers, and stage one .bak or BACPAC file in the configured shared artifact directory. Returns only an opaque artifact ID, kind, and size; artifact bytes and archive member paths are not exposed.",
+			Annotations: &mcp.ToolAnnotations{
+				ReadOnlyHint:    false,
+				DestructiveHint: &destructive,
+				IdempotentHint:  idempotent,
+				OpenWorldHint:   &openWorld,
+			},
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, args stageArgs) (*mcp.CallToolResult, stagedArtifact, error) {
+			if !validBackupID(args.ID) {
+				return nil, stagedArtifact{}, errors.New("invalid backup ID")
+			}
+			result, err := stagingServices[0].Stage(ctx, args.ID)
+			if err != nil {
+				return nil, stagedArtifact{}, errors.New("GoBackup artifact staging failed")
+			}
+			return nil, result, nil
+		})
+	}
 	return server
 }
 

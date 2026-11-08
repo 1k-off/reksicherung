@@ -1,5 +1,5 @@
-// Package restic selects a snapshot and restores it into a configured path
-// inside an already-created, isolated restore container.
+// Package restic lists snapshots and streams selected files from a Restic
+// repository through a local restic executable.
 //
 // The package does not create containers, configure storage, or orchestrate
 // checks. A caller supplies a command runner that executes argv without a
@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"path"
 	"regexp"
@@ -33,6 +34,7 @@ const (
 
 	defaultExecutable = "restic"
 	maxOutputBytes    = 16 << 20
+	maxStreamBytes    = int64(1 << 40)
 )
 
 var (
@@ -71,17 +73,16 @@ type Invocation struct {
 	MaxOutputBytes int64
 }
 
-// Runner executes one command in the restore container. It must not invoke a
-// shell, must honor context cancellation, and must return no more than the
-// requested number of stdout bytes. The returned error is treated as opaque
-// and is never propagated to callers.
+// Runner executes one local restic command. It must not invoke a shell, must
+// honor context cancellation, and must return no more than the requested number
+// of stdout bytes. The returned error is treated as opaque and is never
+// propagated to callers.
 //
-// Implementations should inject Environment values only into the Restic
-// process environment or through short-lived, permission-restricted secret
-// files. They must not pass secret values through argv, logs, error messages,
-// or persistent container configuration. stderr should not be returned as
-// stdout; implementations should retain only bounded, sanitized diagnostics
-// internally, if any.
+// Implementations should inject Environment values only into the Restic process
+// environment or through short-lived, permission-restricted secret files. They
+// must not pass secret values through argv, logs, or error messages. stderr
+// should not be returned as stdout; implementations should retain only bounded,
+// sanitized diagnostics internally, if any.
 type Runner interface {
 	Run(ctx context.Context, invocation Invocation) ([]byte, error)
 }
@@ -93,9 +94,9 @@ type StreamRunner interface {
 	Stream(ctx context.Context, invocation Invocation) (io.ReadCloser, error)
 }
 
-// Config contains the Restic repository and the destination configured for
-// this restore container. TargetPath must be a descendant of TargetRoot; the
-// request cannot override either path.
+// Config contains the Restic repository. Optional TargetRoot/TargetPath are
+// used only by Restore (full snapshot restore to a local path). OpenBackupFile
+// streams one file via dump and does not require target paths.
 type Config struct {
 	Executable     string
 	Repository     string
@@ -103,6 +104,7 @@ type Config struct {
 	TargetPath     string
 	Timeout        time.Duration
 	MaxOutputBytes int64
+	MaxStreamBytes int64
 	Environment    []EnvironmentVariable
 }
 
@@ -143,6 +145,9 @@ func New(config Config, runner Runner) (*Client, error) {
 	if config.MaxOutputBytes == 0 {
 		config.MaxOutputBytes = 1 << 20
 	}
+	if config.MaxStreamBytes == 0 {
+		config.MaxStreamBytes = maxStreamBytes
+	}
 	config.Environment = append([]EnvironmentVariable(nil), config.Environment...)
 	return &Client{config: config, runner: runner}, nil
 }
@@ -153,6 +158,9 @@ func New(config Config, runner Runner) (*Client, error) {
 func (client *Client) Restore(ctx context.Context, selection Selection) (RestoreResult, error) {
 	if ctx == nil {
 		return RestoreResult{}, errors.New("restic: context must not be nil")
+	}
+	if !validTarget(client.config.TargetRoot, client.config.TargetPath) {
+		return RestoreResult{}, ErrInvalidConfig
 	}
 	if !validSelection(selection) {
 		return RestoreResult{}, ErrInvalidSelection
@@ -189,8 +197,9 @@ func (client *Client) Restore(ctx context.Context, selection Selection) (Restore
 	return RestoreResult{Snapshot: selected, Target: client.config.TargetPath}, nil
 }
 
-// OpenBackupFile selects a snapshot and streams exactly one configured .bak
-// file from it. It uses Restic's dump command, never a shell or a
+// OpenBackupFile selects a snapshot and streams exactly one configured regular
+// file from it. The caller may resolve the payload format after streaming. It
+// uses Restic's dump command, never a shell or a
 // snapshot-wide restore. Restic's dump command writes the selected file
 // contents to stdout. The caller owns and must close the returned stream.
 func (client *Client) OpenBackupFile(ctx context.Context, selection Selection, backupPath string) (Snapshot, io.ReadCloser, error) {
@@ -254,7 +263,7 @@ func (client *Client) OpenBackupFile(ctx context.Context, selection Selection, b
 }
 
 // ErrInvalidBackupPath indicates that a requested archive path is not one
-// canonical absolute .bak file path.
+// canonical absolute file path.
 var ErrInvalidBackupPath = errors.New("restic: invalid backup file path")
 
 // ErrStreamingUnsupported indicates that a runner cannot stream the backup
@@ -293,7 +302,7 @@ func (stream *operationStream) Close() error {
 
 func validBackupPath(value string) bool {
 	if value == "" || len(value) > 4096 || !path.IsAbs(value) ||
-		path.Clean(value) != value || !strings.EqualFold(path.Ext(value), ".bak") ||
+		path.Clean(value) != value ||
 		strings.ContainsAny(value, "\\*?[]{}\x00\r\n\t") {
 		return false
 	}
@@ -334,13 +343,16 @@ func validConfig(config Config) bool {
 		strings.ContainsAny(config.Executable, "\x00\r\n\t ") || strings.HasPrefix(config.Executable, "-")) {
 		return false
 	}
-	if !validRepository(config.Repository) || !validTarget(config.TargetRoot, config.TargetPath) {
+	targetConfigured := config.TargetRoot != "" || config.TargetPath != ""
+	if !validRepository(config.Repository) ||
+		(targetConfigured && !validTarget(config.TargetRoot, config.TargetPath)) {
 		return false
 	}
 	if config.Timeout <= 0 || config.Timeout > 24*time.Hour {
 		return false
 	}
-	if config.MaxOutputBytes < 0 || config.MaxOutputBytes > maxOutputBytes {
+	if config.MaxOutputBytes < 0 || config.MaxOutputBytes > maxOutputBytes ||
+		config.MaxStreamBytes < 0 || config.MaxStreamBytes > maxStreamBytes {
 		return false
 	}
 	seen := make(map[string]struct{}, len(config.Environment))
@@ -365,6 +377,14 @@ func allowedEnvironmentName(name string) bool {
 	default:
 		return false
 	}
+}
+
+func isLoopbackEndpoint(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func validRepository(repository string) bool {

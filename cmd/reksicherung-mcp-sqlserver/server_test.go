@@ -39,6 +39,34 @@ func TestLoadConfigRequiresOneMatchingTargetDatabase(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:     "remote target requires verified TLS",
+			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb",
+			database: "RestoredDb",
+			wantErr:  true,
+		},
+		{
+			name:     "remote target rejects disabled TLS",
+			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=disable",
+			database: "RestoredDb",
+			wantErr:  true,
+		},
+		{
+			name:     "remote target rejects unverified certificate",
+			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=true&trustservercertificate=true",
+			database: "RestoredDb",
+			wantErr:  true,
+		},
+		{
+			name:     "remote target with verified TLS",
+			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=true",
+			database: "RestoredDb",
+		},
+		{
+			name:     "remote target with strict TLS",
+			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=strict",
+			database: "RestoredDb",
+		},
+		{
 			name:     "not a SQL Server URL",
 			dsn:      "not a connection string",
 			database: "RestoredDb",

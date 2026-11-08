@@ -1,0 +1,40 @@
+# Local agent / transcript dumps
+.delta/
+previous_work.md
+previous_work.json
+NUL
+
+# Binaries
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/reksicherung
+/reksicherung-mcp-*
+
+# Test / coverage
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace
+vendor/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key

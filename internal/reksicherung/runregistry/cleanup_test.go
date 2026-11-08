@@ -6,31 +6,29 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
-type fakeContainerRemover struct {
-	removedID string
-	err       error
+type fakeDatabaseDropper struct {
+	droppedRunID string
+	err          error
 }
 
-func (remover *fakeContainerRemover) Remove(_ context.Context, target container.Container) error {
-	remover.removedID = target.ID
-	return remover.err
+func (dropper *fakeDatabaseDropper) DropDatabase(_ context.Context, runID string) error {
+	dropper.droppedRunID = runID
+	return dropper.err
 }
 
-func TestCleanupHeldRemovesAndRecordsContainer(t *testing.T) {
+func TestCleanupHeldRemovesAndRecordsDatabase(t *testing.T) {
 	store := openCleanupTestStore(t)
 	createHeldRun(t, store)
-	remover := &fakeContainerRemover{}
+	dropper := &fakeDatabaseDropper{}
 
-	record, err := CleanupHeld(context.Background(), store, remover, "run-123")
+	record, err := CleanupHeld(context.Background(), store, dropper, "run-123")
 	if err != nil {
 		t.Fatalf("CleanupHeld() error = %v", err)
 	}
-	if remover.removedID != "container-123" {
-		t.Fatalf("removed ID = %q, want container-123", remover.removedID)
+	if dropper.droppedRunID != "run-123" {
+		t.Fatalf("dropped run ID = %q, want run-123", dropper.droppedRunID)
 	}
 	if record.Status != StatusFinished || record.CleanupStatus != CleanupSucceeded {
 		t.Fatalf("cleanup result = status %q, cleanup %q", record.Status, record.CleanupStatus)
@@ -40,18 +38,18 @@ func TestCleanupHeldRemovesAndRecordsContainer(t *testing.T) {
 func TestCleanupHeldRecordsFailureAndAllowsRetry(t *testing.T) {
 	store := openCleanupTestStore(t)
 	createHeldRun(t, store)
-	remover := &fakeContainerRemover{err: errors.New("runtime unavailable")}
+	dropper := &fakeDatabaseDropper{err: errors.New("sql server unavailable")}
 
-	record, err := CleanupHeld(context.Background(), store, remover, "run-123")
+	record, err := CleanupHeld(context.Background(), store, dropper, "run-123")
 	if err == nil {
-		t.Fatal("CleanupHeld() error = nil, want removal error")
+		t.Fatal("CleanupHeld() error = nil, want drop error")
 	}
 	if record.Status != StatusFinalizing || record.CleanupStatus != CleanupFailed {
 		t.Fatalf("failed cleanup state = status %q, cleanup %q", record.Status, record.CleanupStatus)
 	}
 
-	remover.err = nil
-	record, err = CleanupHeld(context.Background(), store, remover, "run-123")
+	dropper.err = nil
+	record, err = CleanupHeld(context.Background(), store, dropper, "run-123")
 	if err != nil {
 		t.Fatalf("CleanupHeld(retry) error = %v", err)
 	}
@@ -67,7 +65,7 @@ func TestCleanupHeldRejectsAutomaticRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.ContainerID = "container-123"
+	record.DatabaseName = "reksicherung_abc"
 	record.Status = StatusFinished
 	record.Verdict = VerdictPass
 	record.CleanupStatus = CleanupSucceeded
@@ -75,12 +73,12 @@ func TestCleanupHeldRejectsAutomaticRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remover := &fakeContainerRemover{}
-	if _, err := CleanupHeld(context.Background(), store, remover, record.ID); !errors.Is(err, ErrNotHeldForReview) {
+	dropper := &fakeDatabaseDropper{}
+	if _, err := CleanupHeld(context.Background(), store, dropper, record.ID); !errors.Is(err, ErrNotHeldForReview) {
 		t.Fatalf("CleanupHeld(automatic) error = %v, want ErrNotHeldForReview", err)
 	}
-	if remover.removedID != "" {
-		t.Fatalf("automatic container was removed: %q", remover.removedID)
+	if dropper.droppedRunID != "" {
+		t.Fatalf("automatic database was dropped: %q", dropper.droppedRunID)
 	}
 }
 
@@ -105,7 +103,7 @@ func createHeldRun(t *testing.T, store *Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record.ContainerID = "container-123"
+	record.DatabaseName = "reksicherung_abc"
 	record.Status = StatusFinished
 	record.Verdict = VerdictPass
 	record.CleanupStatus = CleanupRetained

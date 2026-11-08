@@ -1,9 +1,10 @@
-// Package gobackup streams BACPAC files from GoBackup tar archives and imports
-// them into an isolated SQL Server container with SqlPackage.
+// Package gobackup streams BACPAC files from GoBackup tar archives for staging
+// into an operator-managed shared volume. SQL Server import is handled by the
+// remote sqlpackage path in restore/sqlserver, not by this package.
 //
 // Only plain tar and gzip-compressed tar (.tar.gz/.tgz) archives are supported.
 // Encrypted and split archives are intentionally unsupported. The package does
-// not extract archive paths or write BACPAC data to the host filesystem.
+// not extract archive paths onto the host beyond caller-owned writers.
 package gobackup
 
 import (
@@ -26,6 +27,8 @@ const (
 	FormatTar Format = "tar"
 	// FormatTarGzip is a gzip-compressed tar archive (.tar.gz or .tgz).
 	FormatTarGzip Format = "tar.gz"
+	// FormatAuto detects a plain artifact or supported nested archive by content.
+	FormatAuto Format = "auto"
 )
 
 var (

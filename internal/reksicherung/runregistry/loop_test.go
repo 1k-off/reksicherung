@@ -9,12 +9,12 @@ import (
 func TestReconcilerRunPerformsStartupPassAndStopsOnCancellation(t *testing.T) {
 	store := openTestStore(t)
 	now := time.Now().UTC()
-	createExpiringRun(t, store, "run-loop", CleanupAutomatic, "container-loop", now)
-	remover := &fakeRemover{}
+	createExpiringRun(t, store, "run-loop", CleanupAutomatic, "reksicherung_loop", now)
+	dropper := &fakeDropper{}
 	ctx, cancel := context.WithCancel(context.Background())
 	outcomes := make(chan CleanupOutcome, 1)
 
-	err := (Reconciler{Store: store, Containers: remover}).Run(ctx, time.Hour, func(outcome CleanupOutcome) {
+	err := (Reconciler{Store: store, Databases: dropper}).Run(ctx, time.Hour, func(outcome CleanupOutcome) {
 		outcomes <- outcome
 		cancel()
 	})

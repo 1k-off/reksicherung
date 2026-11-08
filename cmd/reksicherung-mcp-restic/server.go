@@ -20,6 +20,15 @@ type selectSnapshotArgs struct {
 	ID string `json:"id" jsonschema:"Full snapshot ID returned by restic_list_snapshots."`
 }
 
+type stageResticArgs struct {
+	SnapshotID string `json:"snapshot_id" jsonschema:"Full snapshot ID returned by restic_list_snapshots."`
+	BackupPath string `json:"backup_path" jsonschema:"Exact absolute backup file path within the snapshot; no wildcards or directories."`
+}
+
+type resticStagingService interface {
+	Stage(context.Context, string, string) (resticStagedArtifact, error)
+}
+
 func (args *listSnapshotsArgs) UnmarshalJSON(data []byte) error {
 	type input listSnapshotsArgs
 	return decodeStrictJSON(data, (*input)(args))
@@ -27,6 +36,11 @@ func (args *listSnapshotsArgs) UnmarshalJSON(data []byte) error {
 
 func (args *selectSnapshotArgs) UnmarshalJSON(data []byte) error {
 	type input selectSnapshotArgs
+	return decodeStrictJSON(data, (*input)(args))
+}
+
+func (args *stageResticArgs) UnmarshalJSON(data []byte) error {
+	type input stageResticArgs
 	return decodeStrictJSON(data, (*input)(args))
 }
 
@@ -58,7 +72,7 @@ type listSnapshotsOutput struct {
 	Truncated bool             `json:"truncated" jsonschema:"True when additional snapshots were omitted."`
 }
 
-func newMCPServer(instance service) *mcp.Server {
+func newMCPServer(instance service, stagers ...resticStagingService) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reksicherung-restic",
 		Version: "0.1.0",
@@ -97,6 +111,21 @@ func newMCPServer(instance service) *mcp.Server {
 		}
 		return nil, toSnapshotOutput(snapshot), nil
 	})
+
+	if len(stagers) != 0 && stagers[0] != nil {
+		destructive, idempotent, openWorld := false, false, true
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "restic_stage_artifact",
+			Description: "Read one exact backup file from a selected Restic snapshot, resolve nested ZIP/tar/gzip wrappers, and stage one .bak or BACPAC in the configured shared artifact volume. Returns opaque metadata only; it never restores a directory tree or returns file bytes.",
+			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &destructive, IdempotentHint: idempotent, OpenWorldHint: &openWorld},
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, args stageResticArgs) (*mcp.CallToolResult, resticStagedArtifact, error) {
+			result, err := stagers[0].Stage(ctx, args.SnapshotID, args.BackupPath)
+			if err != nil {
+				return nil, resticStagedArtifact{}, errors.New("Restic artifact staging failed")
+			}
+			return nil, result, nil
+		})
+	}
 	return server
 }
 

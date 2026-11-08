@@ -17,8 +17,8 @@ import (
 var runsBucket = []byte("runs")
 
 // Store is a durable, transactional run registry backed by bbolt. The database
-// contains only run metadata and container IDs, never credentials or backup
-// contents.
+// contains only run metadata and run-scoped database names, never credentials
+// or backup contents.
 type Store struct {
 	db        *bolt.DB
 	closeOnce sync.Once
@@ -173,7 +173,7 @@ func (store *Store) Update(ctx context.Context, id string, expectedRevision uint
 }
 
 // ListExpired returns automatic-cleanup runs whose lease has expired and which
-// still have a container to remove. Held-for-review runs are never selected.
+// still have a restored database to drop. Held-for-review runs are never selected.
 func (store *Store) ListExpired(ctx context.Context, now time.Time, limit int) ([]Record, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func (store *Store) ListExpired(ctx context.Context, now time.Time, limit int) (
 			}
 			if record.CleanupMode != CleanupAutomatic ||
 				(record.CleanupStatus != CleanupPending && record.CleanupStatus != CleanupFailed && record.CleanupStatus != CleanupInProgress) ||
-				record.ContainerID == "" ||
+				record.DatabaseName == "" ||
 				record.LeaseExpiresAt.After(now) {
 				continue
 			}
@@ -253,8 +253,8 @@ func validateUpdate(current, next Record) error {
 	if current.AironRunID != "" && next.AironRunID != current.AironRunID {
 		return fmt.Errorf("%w: Airon run ID is immutable after it is set", ErrInvalidRecord)
 	}
-	if current.ContainerID != "" && next.ContainerID != current.ContainerID {
-		return fmt.Errorf("%w: container ID is immutable after it is set", ErrInvalidRecord)
+	if current.DatabaseName != "" && next.DatabaseName != current.DatabaseName {
+		return fmt.Errorf("%w: database name is immutable after it is set", ErrInvalidRecord)
 	}
 	if next.LeaseExpiresAt.Before(current.LeaseExpiresAt) {
 		return fmt.Errorf("%w: lease cannot be shortened", ErrInvalidRecord)

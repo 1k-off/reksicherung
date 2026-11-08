@@ -1,4 +1,4 @@
-// Package runregistry persists restore-run lifecycle and cleanup leases.
+// Package runregistry persists restore-run lifecycle and database cleanup leases.
 package runregistry
 
 import (
@@ -47,7 +47,7 @@ const (
 )
 
 var runIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
-var containerIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+var databaseNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_$#-]{0,127}$`)
 
 var (
 	ErrNotFound      = errors.New("run registry: run not found")
@@ -64,7 +64,7 @@ type Record struct {
 	Verdict        Verdict       `json:"verdict"`
 	CleanupMode    CleanupMode   `json:"cleanup_mode"`
 	CleanupStatus  CleanupStatus `json:"cleanup_status"`
-	ContainerID    string        `json:"container_id,omitempty"`
+	DatabaseName   string        `json:"database_name,omitempty"`
 	LeaseExpiresAt time.Time     `json:"lease_expires_at"`
 	CreatedAt      time.Time     `json:"created_at"`
 	UpdatedAt      time.Time     `json:"updated_at"`
@@ -147,16 +147,16 @@ func (record Record) Validate() error {
 	}
 	switch record.CleanupStatus {
 	case CleanupInProgress, CleanupSucceeded, CleanupFailed, CleanupRetained:
-		if record.ContainerID == "" {
-			return fmt.Errorf("%w: cleanup status %q requires a container ID", ErrInvalidRecord, record.CleanupStatus)
+		if record.DatabaseName == "" {
+			return fmt.Errorf("%w: cleanup status %q requires a database name", ErrInvalidRecord, record.CleanupStatus)
 		}
 	case CleanupNotRequired:
-		if record.ContainerID != "" {
-			return fmt.Errorf("%w: cleanup cannot be unnecessary when a container ID exists", ErrInvalidRecord)
+		if record.DatabaseName != "" {
+			return fmt.Errorf("%w: cleanup cannot be unnecessary when a database name exists", ErrInvalidRecord)
 		}
 	}
-	if record.ContainerID != "" && !containerIDPattern.MatchString(record.ContainerID) {
-		return fmt.Errorf("%w: invalid container ID", ErrInvalidRecord)
+	if record.DatabaseName != "" && !databaseNamePattern.MatchString(record.DatabaseName) {
+		return fmt.Errorf("%w: invalid database name", ErrInvalidRecord)
 	}
 	return nil
 }

@@ -73,8 +73,8 @@ func (reader *boundedFrameReader) Close() error {
 	return reader.closer.Close()
 }
 
-func serve(ctx context.Context, instance service, stdin io.ReadCloser, stdout io.WriteCloser) error {
-	server := newMCPServer(instance)
+func serve(ctx context.Context, instance service, stager resticStagingService, stdin io.ReadCloser, stdout io.WriteCloser) error {
+	server := newMCPServer(instance, stager)
 	transport := &mcp.IOTransport{
 		Reader: newBoundedFrameReader(stdin, maxMCPFrameSize),
 		Writer: stdout,

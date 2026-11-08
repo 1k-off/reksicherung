@@ -68,6 +68,28 @@ func TestDecodeRepositoryExampleCatalog(t *testing.T) {
 	}
 }
 
+func TestResticBackupPathAllowsPlainAndArchiveFiles(t *testing.T) {
+	catalog, err := Decode([]byte(validCatalogYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup := catalog.Backups[0]
+	backup.Provider = "restic"
+	backup.RepositoryPasswordRef = "openbao://secret/reksicherung/restic#password"
+	for _, backupPath := range []string{
+		"/mnt/backups/database.bak",
+		"/mnt/backups/database.bak.zip",
+		"/mnt/backups/nested/nightly.tar.gz",
+		"/mnt/backups/nested/database.bacpac",
+	} {
+		backup.BackupPath = backupPath
+		catalog.Backups[0] = backup
+		if err := catalog.Validate(); err != nil {
+			t.Errorf("Validate(backupPath %q) error = %v, want success", backupPath, err)
+		}
+	}
+}
+
 func TestCatalogRejectsMoreSourcesThanRunLimit(t *testing.T) {
 	catalog, err := Decode([]byte(validCatalogYAML))
 	if err != nil {
@@ -328,21 +350,20 @@ func TestCatalogValidationAcceptsExplicitBackupIDAndHTTPSEndpoint(t *testing.T) 
 	}
 }
 
-func TestValidateProductionRequiresDigestPinnedImages(t *testing.T) {
+func TestValidateProductionRequiresHTTPSStorageEndpoint(t *testing.T) {
 	catalog, err := Decode([]byte(validCatalogYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.ValidateProduction(); err == nil || !strings.Contains(err.Error(), "pinned by sha256") {
-		t.Fatalf("ValidateProduction() error = %v, want digest requirement", err)
+	// Restore execution and image selection are operator-managed; a mutable
+	// image tag is not used by catalog validation to start a service.
+	catalog.Backups[0].Restore.Image = "registry.example.test/sqlserver:stable"
+	catalog.Backups[0].Storage.Endpoint = "http://127.0.0.1:9000"
+	if err := catalog.ValidateProduction(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("ValidateProduction() error = %v, want HTTPS requirement", err)
 	}
-
-	catalog.Backups[0].Restore.Image = "mcr.microsoft.com/mssql/server@sha256:" + strings.Repeat("a", 64)
+	catalog.Backups[0].Storage.Endpoint = "https://storage.example.test"
 	if err := catalog.ValidateProduction(); err != nil {
-		t.Fatalf("ValidateProduction(digest) error = %v", err)
-	}
-	catalog.Backups[0].Restore.Image = "mcr.microsoft.com/mssql/server@sha256:invalid"
-	if err := catalog.ValidateProduction(); err == nil {
-		t.Fatal("ValidateProduction() accepted malformed digest")
+		t.Fatalf("ValidateProduction(HTTPS) error = %v", err)
 	}
 }

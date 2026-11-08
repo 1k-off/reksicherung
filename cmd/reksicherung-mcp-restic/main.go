@@ -9,17 +9,24 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	resticservice "github.com/1k-off/reksicherung/internal/reksicherung/mcp/restic"
+	"github.com/1k-off/reksicherung/internal/reksicherung/restore/artifact"
+	"github.com/1k-off/reksicherung/internal/reksicherung/restore/staging"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets/openbao"
 )
 
 const (
-	repositoryEnv   = "REKSICHERUNG_RESTIC_REPOSITORY"
-	maxMCPFrameSize = 64 * 1024
+	repositoryEnv            = "REKSICHERUNG_RESTIC_REPOSITORY"
+	maxMCPFrameSize          = 64 * 1024
+	resticStageDirEnv        = "REKSICHERUNG_ARTIFACT_STAGE_DIR"
+	resticArtifactMaxEnv     = "REKSICHERUNG_ARTIFACT_MAX_BYTES"
+	resticDefaultArtifactMax = int64(200 << 30)
+	resticHardArtifactMax    = int64(1 << 40)
 )
 
 type service interface {
@@ -50,7 +57,28 @@ func run(ctx context.Context, getenv func(string) string, stdin io.ReadCloser, s
 	if err != nil {
 		return err
 	}
-	return serve(ctx, instance, stdin, stdout)
+	maxBytes := resticDefaultArtifactMax
+	if value := getenv(resticArtifactMaxEnv); value != "" {
+		maxBytes, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || maxBytes < 1 || maxBytes > resticHardArtifactMax {
+			return errors.New("invalid configured artifact size limit")
+		}
+	}
+	artifactStore, err := staging.New(getenv(resticStageDirEnv), maxBytes)
+	if err != nil {
+		return errors.New("could not initialize configured artifact staging directory")
+	}
+	fileClient, err := newResticArtifactClient(ctx, config, provider, maxBytes)
+	if err != nil {
+		return err
+	}
+	stager, err := newResticArtifactStager(fileClient, artifactStore, artifact.Limits{
+		MaxInputBytes: maxBytes, MaxExpandedBytes: maxBytes, MaxTemporaryBytes: maxBytes,
+	})
+	if err != nil {
+		return errors.New("could not initialize Restic artifact staging")
+	}
+	return serve(ctx, instance, stager, stdin, stdout)
 }
 
 func newResticService(ctx context.Context, config serverConfig, provider secrets.SecretProvider, runner resticservice.Runner) (*resticservice.Service, error) {

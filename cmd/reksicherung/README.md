@@ -13,12 +13,12 @@ captured and passed as an Airon string input. Both commands reject unknown YAML
 fields, enforce the versioned catalog schema, and limit input files to 1 MiB.
 `catalog` accepts `-source-ref` to provide a stable relative configuration
 reference in each inventory entry; by default it uses the configuration
-file's basename. Use `-production` to require restore images pinned by sha256
-digest; the example is intentionally configured for local development with a
-mutable image tag.
+file's basename. Use `-production` to require HTTPS for configured storage endpoints. The
+restore service image and resource limits are owned by the operator's Compose
+deployment, not by this CLI.
 
-`cleanup -registry <runs.db> -run-id <id>` removes a container retained by a
-`hold_for_review` run. The command records its cleanup attempt before invoking
-the idempotent Podman removal, so it can be retried after interruption.
-Restore execution and MCP integration are still in progress; the CLI does not
-yet start or restore backups.
+The CLI is limited to catalog validation and inventory generation. It does not
+start, stop, or remove containers. Runtime services such as SQL Server and
+backup-provider MCP servers are expected to be started and managed by the
+user's Docker Compose deployment; Airon coordinates those services through
+their configured MCP tools.

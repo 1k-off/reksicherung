@@ -66,11 +66,12 @@ REKSICHERUNG_SQLSERVER_DSN='sqlserver://<login>:<url-escaped-password>@127.0.0.1
 REKSICHERUNG_SQLSERVER_DATABASE='RestoredDb'
 ```
 
-The SQL Server endpoint should be reachable only from the isolated restore
-environment or the MCP process host. Use TLS (`encrypt=true`) outside a
-loopback-only development setup. The database name in both settings must match;
-the process rejects mismatched targets and never accepts a database selector
-from a tool caller.
+The SQL Server endpoint should be reachable only from the user-managed restore
+network or the MCP process host. Startup requires verified TLS (`encrypt=true`
+or `encrypt=strict`, without `trustservercertificate=true`) for non-loopback
+hosts; unencrypted connections are accepted only to loopback addresses for local
+development. The database name in both settings must match; the process rejects
+mismatched targets and never accepts a database selector from a tool caller.
 
 ## Airon stdio configuration
 

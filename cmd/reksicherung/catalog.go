@@ -78,7 +78,7 @@ func parseConfigFlags(command string, args []string, stderr io.Writer) (cliOptio
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	path := flags.String("config", "", "path to the Reksicherung YAML catalog")
-	production := flags.Bool("production", false, "apply production safety validation, including image digest pinning")
+	production := flags.Bool("production", false, "require HTTPS for configured storage endpoints")
 	sourceRef := flags.String("source-ref", "", "stable relative catalog reference for inventory traceability")
 	if err := flags.Parse(args); err != nil {
 		return cliOptions{}, err

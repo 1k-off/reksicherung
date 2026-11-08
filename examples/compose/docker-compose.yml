@@ -1,0 +1,39 @@
+# Reference operator deployment. Reksicherung does not start these services
+# itself; Airon and operators do. Replace secrets, images digests, and network
+# policy before production use.
+services:
+  openbao:
+    image: openbao/openbao:2.1.0
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200", "-dev-root-token-id=dev-only-change-me"]
+    ports:
+      - "127.0.0.1:8200:8200"
+    networks: [reksicherung]
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "ChangeMe_DevOnly_123"
+    volumes:
+      - sql-data:/var/opt/mssql/data
+      - sql-backup:/var/opt/mssql/backup
+    networks: [reksicherung]
+
+  # Build/run MCP binaries on the host or in your own images that include
+  # sqlcmd, sqlpackage, restic, and the reksicherung binaries. Shared volumes
+  # must be the same paths configured via REKSICHERUNG_* environment variables.
+  artifact-stage:
+    image: busybox:1.36
+    command: ["sh", "-c", "mkdir -p /stage /backup && sleep infinity"]
+    volumes:
+      - artifact-stage:/stage
+      - sql-backup:/backup
+    networks: [reksicherung]
+
+networks:
+  reksicherung:
+
+volumes:
+  sql-data:
+  sql-backup:
+  artifact-stage:

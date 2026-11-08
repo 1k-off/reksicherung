@@ -23,7 +23,7 @@ backups:
     selection:
       policy: latest
     restore:
-      # Pin this to a reviewed image digest before production deployment.
+      # Optional advisory note of the operator-managed SQL Server image.
       image: mcr.microsoft.com/mssql/server:2022-latest
       cpuMilli: 2000
       memoryMiB: 4096

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Run repeatedly reconciles expired container leases. It performs one
+// Run repeatedly reconciles expired database-cleanup leases. It performs one
 // reconciliation immediately, then continues at interval until ctx is
 // canceled. Per-run cleanup failures are delivered to onOutcome and retried
 // after the next lease expiry; registry or storage errors stop the loop so a

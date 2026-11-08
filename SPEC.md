@@ -1,16 +1,16 @@
 # Reksicherung — project specification
 
-**Status:** Draft 0.1  
-**Purpose:** Agree on project scope and architecture before implementation.  
+**Status:** Implementation baseline (compose/MCP architecture)  
+**Purpose:** Canonical product scope and architecture for Reksicherung.  
 **Naming:** Use **Reksicherung** in documentation, product references, and package/import-path naming. Go module: `github.com/1k-off/reksicherung`. The repository currently named `bcai` will be renamed later; do not make the repository name a dependency of the design.
 
 ## 1. Summary
 
-Reksicherung verifies that backups can be restored and that restored data passes defined integrity and application-level checks. It complements [Airon](https://github.com/1k-off/airon), an independent AI-powered job runtime. Airon runs the repeatable workflow; Reksicherung supplies backup-specific inventory, MCP tools, restore environments, checks, and evidence.
+Reksicherung verifies that backups can be restored and that restored data passes defined integrity and application-level checks. It complements [Airon](https://github.com/1k-off/airon), an independent AI-powered job runtime. Airon runs the workflow through Reksicherung MCP servers and skills. Users provision and operate MCP servers and database services with Docker Compose; Reksicherung does not create or manage containers.
 
 The initial target is SQL Server databases backed up with GoBackup or Restic, with S3-compatible storage as the first storage backend. Reksicherung also includes a GoBackup configuration generator based on the generic generator in `infrastructure/utils/gobackup-config-generator`, not the generator in `onsite-infrastructure`.
 
-The project is not another backup scheduler and does not claim that the existence of a backup proves recoverability. It tests recovery by restoring into a temporary, isolated environment and recording what was done and what passed or failed.
+The project is not another backup scheduler and does not claim that the existence of a backup proves recoverability. It tests recovery by restoring into an operator-provisioned, isolated SQL Server service and recording what was done and what passed or failed.
 
 ## 2. Goals
 
@@ -20,8 +20,8 @@ The project is not another backup scheduler and does not claim that the existenc
   2. The restore operation completes.
   3. The restored SQL Server database passes database integrity checks.
   4. AI-assisted semantic checks inspect the restored schema and verify that relevant data-bearing tables contain plausible data.
-- Create a disposable restore container/environment automatically for each run.
-- Clean up the database and container after a normal run; optionally keep the environment for human review.
+- Work with user-provisioned restore targets and MCP services, without selecting or controlling a container engine.
+- Clean up only run-scoped restored database state after a normal run; optionally preserve that state for human review.
 - Keep backup, storage, database, secret-provider, and orchestration responsibilities separable.
 - Produce useful audit evidence, including actions, timestamps, results, errors, Airon run ID, and LLM token usage where available.
 - Keep secrets out of repository configuration, generated backup YAML, command-line arguments, and logs.
@@ -31,7 +31,7 @@ The project is not another backup scheduler and does not claim that the existenc
 
 - Replacing Airon, embedding Airon, or making Airon dependent on Reksicherung.
 - Making the audit log cryptographically tamper-proof. Signatures, append-only/WORM storage, and similar anti-tampering controls are explicitly out of scope for the initial design.
-- Encrypting temporary disks solely to destroy an encryption key during cleanup. Deleting the restored database and temporary container/environment is the chosen initial cleanup model.
+- Managing container engines, creating or removing containers, or provisioning infrastructure. Users own service lifecycle and resource limits through their deployment configuration.
 - Creating a general-purpose secrets-management product.
 - Supporting every database, storage backend, or backup engine in the first release.
 - Treating an LLM verdict as proof that a restore is valid. Checks and the primary verdict must be based on tool results and explicit rules.
@@ -42,9 +42,9 @@ The project is not another backup scheduler and does not claim that the existenc
 
 Airon remains an independent project and is read-only for this work. It provides job execution, prompt/skill/MCP orchestration, JSON run logs, and token-usage reporting. Reksicherung integrates using Airon's existing interfaces (configuration, skills, MCP servers, and run outputs); this implementation does not change Airon.
 
-The Airon run JSON is part of the audit evidence. Reksicherung must also produce structured domain evidence for backup discovery, restore, validation, and cleanup. Airon's generated run ID is not automatically included in MCP tool calls, so Reksicherung creates and returns its own run ID and treats any Airon run ID as optional correlation metadata supplied by the workflow. Airon performs the AI-assisted semantic review of the restored database: it inspects schema and runs bounded, read-only queries through Reksicherung tools. Reksicherung owns restore lifecycle and computes the final run result from the required deterministic checks and the structured AI-review result.
+The Airon run JSON is part of the audit evidence. Reksicherung must also produce structured domain evidence for backup discovery, restore, validation, and cleanup. Airon's generated run ID is not automatically included in MCP tool calls, so Reksicherung creates and returns its own run ID and treats any Airon run ID as optional correlation metadata supplied by the workflow. Airon performs the AI-assisted semantic review of the restored database: it inspects schema and runs bounded, read-only queries through Reksicherung tools. Reksicherung owns the run record and computes the final result from required deterministic checks and the structured AI-review result; Airon and configured MCP services drive the workflow.
 
-One high-level restore-check job may contain several constrained tool calls/phases; it does not require embedding an LLM in Reksicherung or changing Airon. Airon executes configured prompts and model-requested tool calls, not a guaranteed fixed sequence of domain operations. Reksicherung must therefore expose explicit stateful operations and must not assume a later Airon cleanup prompt will run after a failure.
+One high-level restore-check job may contain several constrained tool calls/phases; it does not require embedding an LLM in Reksicherung or changing Airon. Airon executes configured prompts and model-requested tool calls, not a guaranteed fixed sequence of domain operations. Reksicherung must therefore expose explicit, retryable database operations and must not assume a later Airon cleanup prompt will run after a failure. These operations must never stop or remove user-managed services.
 
 ### Reksicherung
 
@@ -55,7 +55,7 @@ Reksicherung owns:
 - MCP servers for SQL Server, GoBackup, and Restic, as separate components.
 - Shared storage interfaces and the first S3-compatible implementation.
 - Secret-reference resolution through a provider interface.
-- Restore-environment lifecycle and cleanup/hold-for-review behavior.
+- Run-scoped restore operations and database cleanup/hold-for-review behavior through configured MCP services. Container and service lifecycle remain user-owned.
 - Deterministic restore and validation results plus structured evidence.
 - A restore-and-check skill/runbook for Airon.
 
@@ -77,11 +77,11 @@ Implementations described in `onsite-infrastructure`, `infrastructure`, and Airo
 - SQL Server MCP integration as a self-contained package.
 - Shared S3-compatible storage package.
 - Catalog/inventory generation that connects backup configuration to Airon.
-- Disposable SQL Server restore environment with normal cleanup and optional human-review retention.
+- Compose-provisioned SQL Server restore target with run-scoped database cleanup and optional human-review retention.
 - Deterministic restore/integrity checks and machine-readable evidence.
 - Add the Restic MCP integration before the first usable release, reusing the storage and SQL Server check contracts.
 - Airon skill/config example that runs a check and preserves the Airon JSON run log.
-- Secret references resolved at runtime through a provider abstraction. OpenBao is the first provider; validate it locally in Podman before settling its production operating model.
+- Secret references resolved at runtime through a provider abstraction. OpenBao is the first provider and is deployed/operated by the user alongside other services.
 
 ### Phase 2 — common backup configuration model
 
@@ -99,17 +99,17 @@ Implementations described in `onsite-infrastructure`, `infrastructure`, and Airo
 
 1. **Discover:** Catalog generation reads the canonical Reksicherung configuration and relevant generated backup configuration/artifacts. It emits an inventory of backup sources, repositories, databases, and supported checks for Airon.
 2. **Plan:** Reksicherung creates its own run ID. Project-specific prompt instructions may define which databases to check, whether all or only selected databases are required, and whether checks must be sequential or may run in any order. Airon turns those instructions into an explicit run plan; Reksicherung validates and records the plan before starting any restore. An Airon run ID may be recorded separately if supplied.
-3. **Preflight:** Reksicherung validates configuration, resolves secret references, checks required tool availability, and confirms the target environment can be created. No restore is attempted if required preflight checks fail.
-4. **Prepare:** Create a uniquely named, per-run SQL Server restore container/environment with bounded resources and no connection to the production database network.
-5. **Fetch and restore:** Read the selected backup through the relevant GoBackup or Restic integration and shared storage layer, then restore it into the temporary SQL Server environment.
+3. **Preflight:** Reksicherung validates configuration, resolves secret references, checks required MCP tool availability, and confirms the configured target is reachable. No restore is attempted if required preflight checks fail.
+4. **Prepare:** Select a SQL Server restore target that the user has provisioned and exposed through the configured MCP service. Enforce per-run database naming and request bounds; do not create or reconfigure the service.
+5. **Fetch and restore:** Read the selected backup through the relevant GoBackup or Restic MCP integration and restore it into the user-provisioned SQL Server target.
 6. **Validate:** Run database integrity checks. Airon inspects the restored schema and uses restricted SQL Server tools to issue bounded, read-only `SELECT` queries to assess whether relevant tables contain data and whether the observed data is plausible for the project. Record the schema context, queries, sanitized/aggregated results, and structured AI assessment.
 7. **Decide:** Airon returns a structured semantic-check result with evidence. Reksicherung aggregates it with deterministic restore/integrity results to compute the authoritative `PASS`, `FAIL`, or `INCONCLUSIVE` verdict. The AI cannot override a failed required check or mark an unrun required check as passed.
-8. **Finalize:** In normal mode, delete the restored database and stop/remove the temporary environment. In human-review mode, retain them and report how to inspect and later remove them. Reksicherung persists run state and provides a reconciliation/lease mechanism so interrupted or abandoned runs can be cleaned without depending on Airon reaching a final cleanup call; held-for-review runs are exempt until explicit operator cleanup or configured expiry.
+8. **Finalize:** In normal mode, delete only the run-scoped restored database through the SQL Server MCP service. In human-review mode, leave the database available and report how to inspect and remove it. Reksicherung records database cleanup state; it never stops or removes user-managed services.
 9. **Record:** Write structured Reksicherung evidence and preserve the corresponding Airon JSON run log, linked by run ID.
 
 All started operations should have explicit states and timestamps. Cancellation, timeout, restore failure, validation failure, and cleanup failure must be represented in the final result and evidence rather than silently discarded.
 
-Run lifecycle operations must be idempotent and recoverable after Reksicherung or Airon restarts. The initial integration should use a long-lived Reksicherung service over streamable HTTP MCP (or an equivalent persistent service boundary), rather than relying on a short-lived Airon-spawned process to own temporary containers. A local CLI may also be provided for administration and development.
+Run operations must be idempotent and recoverable after Reksicherung or Airon restarts. MCP servers are user-provisioned and managed outside Reksicherung, typically by Docker Compose; no Reksicherung process owns container lifecycle. A local CLI may validate catalogs and generate inventory, but must not manage services.
 
 ## 7. Configuration and generators
 
@@ -126,7 +126,7 @@ Use a versioned, human-maintainable YAML configuration as the source of truth. I
 - Cleanup mode: normal cleanup or `hold_for_review`.
 - Evidence output/retention settings.
 
-The first catalog schema is versioned as `reksicherung.io/v1alpha1` with `kind: BackupCatalog`. It currently supports SQL Server sources using GoBackup or Restic, S3-compatible storage, OpenBao secret references, `latest` or explicit backup-ID selection, bounded restore resources/timeouts, and `delete` or `hold_for_review` cleanup. Restic sources require a `repositoryPasswordRef` and one exact absolute `.bak` `backupPath` within the selected snapshot; GoBackup sources reject both. The Airon inventory is a separate deterministic JSON projection that omits secret references, endpoints, and restore settings. See `docs/decisions/0001-catalog-config-and-inventory.md`; the schema remains subject to evolution before a stable `v1` release. Prompt instructions can define per-project selection and ordering policy, but the normalized run plan is recorded and validated rather than being left as unstructured prose at execution time.
+The first catalog schema is versioned as `reksicherung.io/v1alpha1` with `kind: BackupCatalog`. It currently supports SQL Server sources using GoBackup or Restic, S3-compatible storage, OpenBao secret references, `latest` or explicit backup-ID selection, bounded restore resources/timeouts, and `delete` or `hold_for_review` cleanup. Restic sources require a `repositoryPasswordRef` and one exact absolute `backupPath` within the selected snapshot; that file may be a plain database artifact or a supported nested ZIP/tar/gzip-tar archive. GoBackup sources reject both Restic-specific fields. The Airon inventory is a separate deterministic JSON projection that omits secret references, endpoints, and restore settings. See `docs/decisions/0001-catalog-config-and-inventory.md`; the schema remains subject to evolution before a stable `v1` release. Prompt instructions can define per-project selection and ordering policy, but the normalized run plan is recorded and validated rather than being left as unstructured prose at execution time.
 
 ### GoBackup generator
 
@@ -158,31 +158,40 @@ All project-owned Go import paths and package namespaces should contain `reksich
 
 ```text
 cmd/
-  reksicherung/                  # CLI: validate, catalog, run/check, cleanup
-  reksicherung-mcp-sqlserver/    # SQL Server MCP server
-  reksicherung-mcp-gobackup/     # GoBackup MCP server
-  reksicherung-mcp-restic/      # Restic MCP server
+  reksicherung/                       # CLI: validate, catalog
+  reksicherung-mcp-sqlserver/         # read-only SQL Server MCP (AI review)
+  reksicherung-mcp-sqlserver-restore/ # restore/integrity/drop against operator SQL Server
+  reksicherung-mcp-gobackup/          # GoBackup discover + stage MCP
+  reksicherung-mcp-restic/            # Restic discover + stage MCP
 internal/reksicherung/
-  config/                        # versioned YAML model and validation
-  catalog/                       # config/artifact to Airon inventory
-  workflow/                      # restore-check orchestration and verdict
-  restore/                       # restore lifecycle contracts
-  runtime/container/             # disposable environment implementation
-  evidence/                      # structured check evidence
-  secrets/                       # secret-provider interface and reference handling
-  secrets/openbao/               # initial candidate provider
-  storage/                       # shared storage interface
-  storage/s3/                    # first storage implementation
-  mcp/sqlserver/                 # SQL Server-specific tools
-  mcp/gobackup/                  # GoBackup-specific tools
-  mcp/restic/                    # Restic-specific tools
-  configgen/gobackup/            # adapted generic GoBackup generator
+  config/                             # versioned YAML model and validation
+  catalog/                            # config/artifact to Airon inventory
+  workflow/                           # verdict aggregation
+  plan/                               # validated run-plan model
+  restore/artifact/                   # resolve .bak/.bacpac from archives
+  restore/staging/                    # operator-managed shared staging directory
+  restore/sqlserver/                  # remote restore ops (sqlcmd/sqlpackage)
+  restore/gobackup/                   # GoBackup archive helpers
+  restore/restic/                     # local restic client (no container engine)
+  runregistry/                        # durable run + DB cleanup leases
+  evidence/                           # structured check evidence
+  secrets/                            # secret-provider interface and references
+  secrets/openbao/                    # OpenBao KV v2 provider
+  storage/                            # shared storage interface
+  storage/s3/                         # S3-compatible implementation
+  mcp/sqlserver/                      # SQL Server read-only tool service
+  mcp/gobackup/                       # GoBackup discovery service
+  mcp/restic/                         # Restic discovery service
+  mcp/reksicherung/                   # high-level restore-check MCP surface
+  configgen/gobackup/                 # optional GoBackup generator
 skills/reksicherung-restore-check/
-  SKILL.md                       # Airon-oriented restore/check runbook
+  SKILL.md                            # Airon-oriented restore/check runbook
+examples/compose/                     # operator Docker Compose reference
 docs/
-  SPEC.md
   decisions/
 ```
+
+Restore MCP services and SQL Server share operator-mounted staging/backup volumes. Reksicherung never starts or removes those services.
 
 This is a proposed separation, not a commitment to expose all packages as public Go APIs. Keep provider-specific behavior within its package; shared packages should define narrow interfaces rather than import concrete MCP implementations.
 
@@ -199,21 +208,16 @@ Tools should be narrow and purpose-specific. Avoid exposing unrestricted shell e
 
 Exact MCP tool names and argument schemas remain to be designed and documented with examples.
 
-## 10. Restore environment and lifecycle
+## 10. Restore target and lifecycle
 
-- Create an isolated, uniquely identifiable container/environment for each restore run.
-- The restore target must not join a production database network or receive production database credentials.
-- Apply configurable CPU, memory, disk, and time limits.
-- Give the environment only the network access required for restore and validation; do not assume broad outbound access.
-- Use temporary database credentials with only the permissions required for the check.
-- **Normal mode:** delete the restored database and stop/remove the temporary container/environment after the run, including after failure where possible.
-- **Human-review mode:** `hold_for_review` leaves the restored database and environment in place. Evidence must clearly report the retained resource identifiers, status, and cleanup instructions. Retention is explicit, not an accidental consequence of a failed cleanup.
-- Record cleanup attempts and outcomes. A cleanup failure must be visible and must not be reported as a fully clean successful run.
+- Connect only to a SQL Server restore target explicitly provisioned by the user and exposed by a configured MCP service.
+- The target must be isolated from production and must not receive production database credentials.
+- Users set CPU, memory, disk, lifetime, and network controls in Docker Compose or their chosen service manager. Reksicherung validates request bounds but does not create or modify services.
+- **Normal mode:** drop only the run-scoped restored database after the run, including after failure where possible. Never stop or remove the SQL Server service.
+- **Human-review mode:** `hold_for_review` leaves the restored database in place. Evidence reports its database identifier and cleanup instructions. Retention is explicit, not an accidental consequence of a failed cleanup.
+- Record database cleanup attempts and outcomes. A cleanup failure must be visible and must not be reported as a fully clean successful run.
 - Do not require encrypted temporary disks or cryptographic key destruction in the initial design.
-- Use Podman as the initial local container engine.
-- For local development and the first SQL Server integration tests, use `mcr.microsoft.com/mssql/server:2022-latest`.
-
-The runtime interface should avoid coupling restore orchestration to Podman-specific concepts so another container engine can be considered later. Restore containers use no network by default, publish no host ports, and have bounded CPU, memory, and process counts. Before production use, define image update/provenance policy and whether the SQL Server image should be pinned by digest.
+- Reksicherung has no container-engine adapter. Compose files, SQL Server images, service lifecycle, network policy, and service resource limits belong to the user/operator.
 
 ## 11. Secrets and credentials
 
@@ -299,9 +303,9 @@ The initial design does not require cryptographic evidence signing or encrypted 
 1. A user can describe a GoBackup or Restic SQL Server backup source without placing secret values in the repository.
 2. Catalog generation validates the configuration and produces an Airon-consumable inventory.
 3. Airon can run the documented Reksicherung restore-check workflow using the Reksicherung MCP servers and skill, without requiring Airon source changes.
-4. A run creates a separate temporary SQL Server environment, restores the selected backup, and executes required integrity checks.
+4. A run uses the SQL Server service already provisioned by the operator, restores the selected backup into a run-scoped database, and executes required integrity checks.
 5. The workflow returns a deterministic `PASS`, `FAIL`, or `INCONCLUSIVE` result based on tool/check outcomes.
-6. Normal mode attempts to remove the restored database and environment; human-review mode retains them and provides cleanup details.
+6. Normal mode attempts to drop the run-scoped database; human-review mode retains it and provides cleanup details. Neither mode changes service/container lifecycle.
 7. The Airon JSON run log and Reksicherung evidence can be correlated by run ID and include the steps, results, cleanup outcome, and available token usage.
 8. Secret values do not appear in generated configs, inventory, logs, or evidence.
 9. The GoBackup generator is based on the generic infrastructure generator, and the future Restic generator is designed to share the canonical YAML model.
@@ -310,12 +314,12 @@ The initial design does not require cryptographic evidence signing or encrypted 
 ## 17. Confirmed implementation baseline
 
 - Product and Go namespace: **Reksicherung**; module path `github.com/1k-off/reksicherung`.
-- Airon remains independent and unchanged. It starts one high-level restore-check job; Reksicherung owns restore lifecycle and final result aggregation, while Airon performs the AI-assisted semantic review through constrained Reksicherung tools.
+- Airon remains independent and unchanged. It runs the restore-check workflow; Reksicherung MCP services provide constrained provider and SQL operations, and Airon performs the AI-assisted semantic review. Run state and final verdict aggregation are persisted by the configured Reksicherung service, without container lifecycle control.
 - First end-to-end path: GoBackup + S3-compatible storage + SQL Server. Add Restic support before the first usable release.
-- Use Podman for the initial local container workflow and `mcr.microsoft.com/mssql/server:2022-latest` for local development/integration testing.
-- Normal cleanup is the default; `hold_for_review` retains the restore environment until an operator explicitly removes it.
-- Use secret references and a provider interface. OpenBao is the first provider; local tests use a Podman OpenBao dev container only, never real secrets.
-- Use mocks for unit tests and a MinIO/OpenMaxIO-style S3-compatible container for end-to-end tests; choose the concrete test image separately.
+- Docker Compose (or another user-managed service manager) provisions MCP servers and SQL Server; Reksicherung does not manage containers or require configgen-generated backups.
+- Normal cleanup drops only the run-scoped database; `hold_for_review` retains that database until an operator explicitly removes it.
+- Use secret references and a provider interface. OpenBao is the first provider; test services are operator-started and use dummy secrets.
+- Use mocks for unit tests and user-started disposable S3-compatible and SQL Server services for end-to-end tests. Tests must not mutate source backup objects.
 - Per-project prompts may describe database scope, required coverage, and order. Normalize those instructions into a validated run plan.
 - Empty tables are warnings, not automatic failures; per-database annotations for tables expected to be empty are optional.
 - Retry only bounded transient/idempotent operations by default; do not automatically replay an entire restore and AI-check run.

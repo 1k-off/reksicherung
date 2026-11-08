@@ -75,12 +75,28 @@ func TestCLICatalogEmitsOnlyAironInventory(t *testing.T) {
 	}
 }
 
-func TestCLIProductionRejectsMutableRestoreImage(t *testing.T) {
-	path := writeConfig(t, validCatalog)
+func TestCLIProductionRequiresHTTPSStorage(t *testing.T) {
+	catalog := strings.Replace(validCatalog, "https://storage.example.test", "http://127.0.0.1:9000", 1)
+	path := writeConfig(t, catalog)
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{"validate", "-config", path, "-production"}, &stdout, &stderr)
-	if err == nil || !strings.Contains(err.Error(), "pinned by sha256") {
-		t.Fatalf("run() error = %v, want production digest requirement", err)
+	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("run() error = %v, want HTTPS requirement", err)
+	}
+	if strings.Contains(err.Error(), "digest") || strings.Contains(err.Error(), "image") {
+		t.Fatalf("production validation still depends on an operator-managed image: %v", err)
+	}
+}
+
+func TestCLIHelpOnlyAdvertisesCatalogCommands(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run(context.Background(), []string{"help"}, &stdout, &stderr); err != nil {
+		t.Fatalf("run(help) error = %v", err)
+	}
+	for _, forbidden := range []string{"cleanup", "reconcile", "podman", "container"} {
+		if strings.Contains(strings.ToLower(stdout.String()), forbidden) {
+			t.Errorf("help advertises engine management %q: %s", forbidden, stdout.String())
+		}
 	}
 }
 
@@ -88,6 +104,7 @@ func TestCLIRejectsMissingConfigAndUnexpectedArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"validate"},
 		{"catalog", "-config", "somewhere.yaml", "extra"},
+		{"cleanup", "-registry", "runs.db", "-run-id", "run-123"},
 		{"reconcile"},
 		{"reconcile", "-registry", "runs.db", "-interval", "500ms"},
 	} {
