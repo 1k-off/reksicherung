@@ -72,7 +72,7 @@ func TestPodmanSQLServerOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("check integration database integrity: %v", err)
 	}
-	if !result.Passed || result.Database != database {
+	if !result.CommandCompleted || result.Database != database {
 		t.Fatalf("integrity result = %#v", result)
 	}
 	if err := operations.DropDatabase(ctx); err != nil {

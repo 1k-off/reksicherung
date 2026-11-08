@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -14,14 +16,18 @@ import (
 const testPassword = "test-secret-password"
 
 type fakeRuntime struct {
-	command     []string
-	target      container.Container
-	environment []container.EnvironmentVariable
-	ctx         context.Context
-	output      []byte
-	err         error
-	calls       int
-	exec        func(context.Context) ([]byte, error)
+	command      []string
+	target       container.Container
+	environment  []container.EnvironmentVariable
+	ctx          context.Context
+	output       []byte
+	err          error
+	calls        int
+	exec         func(context.Context) ([]byte, error)
+	transferName string
+	transferMax  int64
+	transferErr  error
+	transfer     func(context.Context, string, io.ReadCloser, int64) error
 }
 
 func (runtime *fakeRuntime) ExecWithEnvironment(ctx context.Context, target container.Container, command []string, environment []container.EnvironmentVariable) ([]byte, error) {
@@ -34,6 +40,19 @@ func (runtime *fakeRuntime) ExecWithEnvironment(ctx context.Context, target cont
 		return runtime.exec(ctx)
 	}
 	return runtime.output, runtime.err
+}
+
+func (runtime *fakeRuntime) Transfer(ctx context.Context, _ container.Container, name string, source io.ReadCloser, maxBytes int64) error {
+	runtime.transferName = name
+	runtime.transferMax = maxBytes
+	if runtime.transfer != nil {
+		return runtime.transfer(ctx, name, source, maxBytes)
+	}
+	_, err := io.Copy(io.Discard, source)
+	if err != nil {
+		return err
+	}
+	return runtime.transferErr
 }
 
 func newTestOperations(t *testing.T, runtime *fakeRuntime) *Operations {
@@ -69,7 +88,7 @@ func TestCheckIntegrityUsesFixedSQLCMDAndReturnsSanitizedResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckIntegrity() error = %v", err)
 	}
-	if result != (IntegrityResult{Database: database, Passed: true}) {
+	if result != (IntegrityResult{Database: database, CommandCompleted: true}) {
 		t.Fatalf("CheckIntegrity() result = %#v", result)
 	}
 	assertSQLCMDInvocation(t, runtime)
@@ -245,6 +264,189 @@ func TestOperationsReturnOnlySanitizedErrorsAndNoOutputOnOverflow(t *testing.T) 
 			t.Fatalf("CheckIntegrity() = (%#v, %v), want zero result and ErrOutputLimit", result, err)
 		}
 	})
+}
+
+func TestRestoreBackupTransfersToFixedPathAndMovesEveryFile(t *testing.T) {
+	runtime := &fakeRuntime{}
+	runtime.exec = func(context.Context) ([]byte, error) {
+		if runtime.calls == 1 {
+			return []byte(backupFileListRow("primary", "D") + "\n" +
+				backupFileListRow("secondary", "D") + "\n" +
+				backupFileListRow("transaction-log", "L") + "\n"), nil
+		}
+		return []byte("restore output is intentionally discarded"), nil
+	}
+	operations := newTestOperations(t, runtime)
+
+	if err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup"))); err != nil {
+		t.Fatalf("RestoreBackup() error = %v", err)
+	}
+	if runtime.transferName != nativeBackupName || runtime.transferMax != maxNativeBackupBytes {
+		t.Fatalf("Transfer(name, max) = (%q, %d), want fixed artifact and bounded size", runtime.transferName, runtime.transferMax)
+	}
+	if runtime.calls != 2 {
+		t.Fatalf("ExecWithEnvironment() calls = %d, want FILELISTONLY and RESTORE", runtime.calls)
+	}
+	assertSQLCMDInvocation(t, runtime)
+	restoreQuery := runtime.command[len(runtime.command)-1]
+	if !strings.HasPrefix(restoreQuery, "RESTORE DATABASE ["+operations.database+"] FROM DISK = N'"+nativeBackupPath+"'") {
+		t.Fatalf("restore query is not bound to the run database and fixed backup: %q", restoreQuery)
+	}
+	expectedMoves := []string{
+		"MOVE N'primary' TO N'/var/opt/mssql/data/" + operations.database + "_data_001.mdf'",
+		"MOVE N'secondary' TO N'/var/opt/mssql/data/" + operations.database + "_data_002.ndf'",
+		"MOVE N'transaction-log' TO N'/var/opt/mssql/data/" + operations.database + "_log_001.ldf'",
+	}
+	for _, move := range expectedMoves {
+		if !strings.Contains(restoreQuery, move) {
+			t.Errorf("restore query %q does not contain %q", restoreQuery, move)
+		}
+	}
+	if !strings.Contains(strings.Join(runtime.command, "\x00"), nativeBackupPath) {
+		t.Fatal("FILELISTONLY/RESTORE command did not use the fixed backup path")
+	}
+}
+
+func TestRestoreBackupQuotesUntrustedLogicalNames(t *testing.T) {
+	injectionLikeName := "primary'; DROP DATABASE master;--"
+	files, err := parseBackupFileList([]byte(backupFileListRow(injectionLikeName, "D") + "\n" +
+		backupFileListRow("log", "L") + "\n"))
+	if err != nil {
+		t.Fatalf("parseBackupFileList() error = %v", err)
+	}
+	query, err := restoreQuery("reksicherung_test", files)
+	if err != nil {
+		t.Fatalf("restoreQuery() error = %v", err)
+	}
+	if !strings.Contains(query, "MOVE N'primary''; DROP DATABASE master;--' TO ") {
+		t.Fatalf("logical name was not escaped as a SQL string literal: %q", query)
+	}
+	if strings.Contains(query, "MOVE N'primary'; DROP") {
+		t.Fatalf("logical name escaped its SQL string literal: %q", query)
+	}
+}
+
+func TestParseBackupFileListRejectsMalformedUnsupportedAndMissingFiles(t *testing.T) {
+	tests := map[string]string{
+		"wrong column count":        backupFileListRow("data", "D") + "|extra\n" + backupFileListRow("log", "L"),
+		"delimiter in logical name": backupFileListRow("data|extra", "D") + "\n" + backupFileListRow("log", "L"),
+		"control in logical name":   backupFileListRow("data\tname", "D") + "\n" + backupFileListRow("log", "L"),
+		"newline injection":         backupFileListRow("data\nDROP DATABASE master;--", "D") + "\n" + backupFileListRow("log", "L"),
+		"unsupported file type":     backupFileListRow("data", "D") + "\n" + backupFileListRow("stream", "S") + "\n" + backupFileListRow("log", "L"),
+		"missing data":              backupFileListRow("log", "L"),
+		"missing log":               backupFileListRow("data", "D"),
+		"duplicate logical name":    backupFileListRow("same", "D") + "\n" + backupFileListRow("SAME", "L"),
+	}
+	for name, output := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseBackupFileList([]byte(output)); !errors.Is(err, ErrInvalidBackupMetadata) {
+				t.Fatalf("parseBackupFileList() error = %v, want ErrInvalidBackupMetadata", err)
+			}
+		})
+	}
+}
+
+func TestParseBackupFileListRejectsFileCountAndOutputOverflow(t *testing.T) {
+	rows := make([]string, maxBackupFiles+1)
+	for index := range rows {
+		fileType := "D"
+		if index == maxBackupFiles {
+			fileType = "L"
+		}
+		rows[index] = backupFileListRow(fmt.Sprintf("file-%d", index), fileType)
+	}
+	if _, err := parseBackupFileList([]byte(strings.Join(rows, "\n"))); !errors.Is(err, ErrInvalidBackupMetadata) {
+		t.Fatalf("parseBackupFileList(file overflow) error = %v, want ErrInvalidBackupMetadata", err)
+	}
+	if _, err := parseBackupFileList(bytes.Repeat([]byte("x"), maxOutputBytes+1)); !errors.Is(err, ErrInvalidBackupMetadata) {
+		t.Fatalf("parseBackupFileList(output overflow) error = %v, want ErrInvalidBackupMetadata", err)
+	}
+}
+
+func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
+	t.Run("transfer failure", func(t *testing.T) {
+		runtime := &fakeRuntime{transferErr: errors.New("transfer leaked " + testPassword)}
+		operations := newTestOperations(t, runtime)
+		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+		if !errors.Is(err, ErrBackupTransferFailed) || strings.Contains(err.Error(), testPassword) {
+			t.Fatalf("RestoreBackup() error = %v, want sanitized transfer failure", err)
+		}
+		if runtime.calls != 0 {
+			t.Fatalf("sqlcmd calls = %d after transfer failure, want 0", runtime.calls)
+		}
+	})
+	t.Run("sqlcmd failure", func(t *testing.T) {
+		runtime := &fakeRuntime{err: errors.New("SQL output leaked " + testPassword)}
+		operations := newTestOperations(t, runtime)
+		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+		if !errors.Is(err, ErrCommandFailed) || strings.Contains(err.Error(), testPassword) ||
+			strings.Contains(err.Error(), "SQL output leaked") {
+			t.Fatalf("RestoreBackup() error = %v, want sanitized command failure", err)
+		}
+	})
+	t.Run("FILELISTONLY output overflow", func(t *testing.T) {
+		runtime := &fakeRuntime{output: bytes.Repeat([]byte("x"), maxOutputBytes+1)}
+		operations := newTestOperations(t, runtime)
+		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+		if !errors.Is(err, ErrOutputLimit) {
+			t.Fatalf("RestoreBackup() error = %v, want sanitized output limit", err)
+		}
+	})
+}
+
+func TestRestoreBackupHonorsTimeoutAndCancellation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		want error
+	}{
+		{name: "deadline", want: ErrTimeout},
+		{name: "cancellation", want: ErrCanceled},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runtime := &fakeRuntime{}
+			started := make(chan struct{})
+			runtime.exec = func(ctx context.Context) ([]byte, error) {
+				close(started)
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			operations := newTestOperations(t, runtime)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if test.name == "deadline" {
+				var deadlineCancel context.CancelFunc
+				ctx, deadlineCancel = context.WithTimeout(context.Background(), 25*time.Millisecond)
+				defer deadlineCancel()
+			}
+			result := make(chan error, 1)
+			go func() {
+				result <- operations.RestoreBackup(ctx, io.NopCloser(strings.NewReader("backup")))
+			}()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("FILELISTONLY command did not start")
+			}
+			if test.name == "cancellation" {
+				cancel()
+			}
+			select {
+			case err := <-result:
+				if !errors.Is(err, test.want) {
+					t.Fatalf("RestoreBackup() error = %v, want %v", err, test.want)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("RestoreBackup() did not stop after context ended")
+			}
+		})
+	}
+}
+
+func backupFileListRow(logicalName, fileType string) string {
+	columns := make([]string, fileListColumns)
+	columns[0] = logicalName
+	columns[2] = fileType
+	return strings.Join(columns, "|")
 }
 
 func assertSQLCMDInvocation(t *testing.T, runtime *fakeRuntime) {

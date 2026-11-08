@@ -376,7 +376,7 @@ func (operations *pipelineTestOperations) CheckIntegrity(context.Context) (sqlse
 	if operations.integrityErr != nil {
 		return sqlserverrestore.IntegrityResult{}, operations.integrityErr
 	}
-	return sqlserverrestore.IntegrityResult{Passed: false}, nil
+	return sqlserverrestore.IntegrityResult{CommandCompleted: true}, nil
 }
 
 type pipelineTestRuntime struct {
