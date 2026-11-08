@@ -104,6 +104,7 @@ backups:
     provider: restic
     repositoryPasswordRef: openbao://secret/reksicherung/restic#repository-password
     backupName: production
+    backupPath: /var/opt/mssql/backup/production.bak
     database:
       type: sqlserver
       name: App

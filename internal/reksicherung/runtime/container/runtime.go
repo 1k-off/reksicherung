@@ -43,6 +43,7 @@ type EnvironmentVariable struct {
 type Spec struct {
 	RunID           string
 	Image           string
+	Network         string
 	CPUs            float64
 	MemoryBytes     int64
 	DiskBytes       int64
@@ -78,6 +79,9 @@ func ValidateSpec(spec Spec) error {
 	if spec.Image == "" || strings.HasPrefix(spec.Image, "-") || strings.TrimSpace(spec.Image) != spec.Image || strings.ContainsAny(spec.Image, "\x00\r\n\t ") {
 		return fmt.Errorf("%w: image reference is empty or contains whitespace", ErrInvalidSpec)
 	}
+	if !ValidateNetworkName(spec.Network) {
+		return fmt.Errorf("%w: network must be empty (none) or a named isolated network", ErrInvalidSpec)
+	}
 	if math.IsNaN(spec.CPUs) || math.IsInf(spec.CPUs, 0) || spec.CPUs < 0.25 || spec.CPUs > MaxContainerCPUs {
 		return fmt.Errorf("%w: CPU limit must be between 0.25 and %g", ErrInvalidSpec, MaxContainerCPUs)
 	}
@@ -94,6 +98,32 @@ func ValidateSpec(spec Spec) error {
 		return fmt.Errorf("%w: %v", ErrInvalidSpec, err)
 	}
 	return nil
+}
+
+// ValidateNetworkName reports whether a network is either empty (which means
+// no network) or a safe, named Podman network. Host networking is unsupported.
+func ValidateNetworkName(name string) bool {
+	if name == "" {
+		return true
+	}
+	if name == "host" {
+		return false
+	}
+	if len(name) > 128 {
+		return false
+	}
+	for index, character := range name {
+		alphaNumeric := character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9'
+		if index == 0 && !alphaNumeric {
+			return false
+		}
+		if !alphaNumeric && character != '_' && character != '-' && character != '.' {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidateEnvironment checks that environment variables can be represented

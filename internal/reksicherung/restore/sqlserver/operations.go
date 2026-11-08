@@ -27,7 +27,6 @@ const (
 	dropDBTimeout        = 30 * time.Second
 	nativeRestoreTimeout = 6 * time.Hour
 	fileListTimeout      = 30 * time.Second
-	headerOnlyColumns    = 59
 	maxNativeBackupBytes = int64(1 << 40)
 	pollInterval         = time.Second
 )
@@ -37,6 +36,9 @@ const (
 	nativeBackupPath = "/var/opt/mssql/backup/" + nativeBackupName
 	maxBackupFiles   = 16
 	fileListColumns  = 22
+	// SQL Server 2022 RESTORE HEADERONLY returns 59 columns. If the server
+	// version changes that shape, native restore rejects the header.
+	headerOnlyColumns = 59
 )
 
 var (
@@ -109,10 +111,14 @@ func New(runtime commandRuntime, target container.Container, database, password 
 }
 
 // RestoreBackup transfers one bounded native SQL Server backup into the fixed
-// restore-container path, reads its file list, and restores only into the
-// database bound to this Operations value. The archive is always closed.
-func (operations *Operations) RestoreBackup(ctx context.Context, archive io.ReadCloser) (returnErr error) {
+// restore-container path, requires exactly one full backup set, reads its file
+// list, and restores only into the database bound to this Operations value.
+// The staged artifact is removed after use, and the archive is always closed.
+func (operations *Operations) RestoreBackup(ctx context.Context, archive io.ReadCloser, expectedSourceDatabase string) (returnErr error) {
 	if archive == nil {
+		return ErrInvalidConfig
+	}
+	if !validDatabaseName(expectedSourceDatabase) {
 		return ErrInvalidConfig
 	}
 	ownedArchive := &closeOnceReadCloser{ReadCloser: archive}
@@ -154,11 +160,10 @@ func (operations *Operations) RestoreBackup(ctx context.Context, archive io.Read
 		return sanitizedErr
 	}
 	headerCancel()
-	if err := validateSingleFullBackupSet(headerOutput); err != nil {
+	if err := validateSingleFullBackupSet(headerOutput, expectedSourceDatabase); err != nil {
 		return err
 	}
-	fileListQuery := "RESTORE FILELISTONLY FROM DISK = " + quoteStringLiteral(nativeBackupPath) + ";"
-	fileListQuery = strings.TrimSuffix(fileListQuery, ";") + " WITH FILE = 1;"
+	fileListQuery := "RESTORE FILELISTONLY FROM DISK = " + quoteStringLiteral(nativeBackupPath) + " WITH FILE = 1;"
 	fileListCtx, fileListCancel := boundedChildContext(operationCtx, fileListTimeout)
 	output, err := operations.executeWithOptions(fileListCtx, fileListQuery, "-h", "-1", "-W", "-s", "|")
 	if err != nil {
@@ -429,7 +434,7 @@ func parseBackupFileList(output []byte) ([]backupFile, error) {
 	return files, nil
 }
 
-func validateSingleFullBackupSet(output []byte) error {
+func validateSingleFullBackupSet(output []byte, expectedDatabase string) error {
 	if len(output) == 0 || len(output) > maxOutputBytes || !utf8.Valid(output) {
 		return ErrInvalidBackupMetadata
 	}
@@ -444,7 +449,8 @@ func validateSingleFullBackupSet(output []byte) error {
 		}
 	}
 	columns := strings.Split(row, "|")
-	if len(columns) != headerOnlyColumns || columns[2] != "1" || columns[5] != "1" {
+	if len(columns) != headerOnlyColumns || columns[2] != "1" || columns[5] != "1" ||
+		columns[9] != expectedDatabase {
 		return ErrInvalidBackupMetadata
 	}
 	return nil

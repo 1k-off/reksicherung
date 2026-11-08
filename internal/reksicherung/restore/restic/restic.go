@@ -20,6 +20,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -83,6 +84,13 @@ type Invocation struct {
 // internally, if any.
 type Runner interface {
 	Run(ctx context.Context, invocation Invocation) ([]byte, error)
+}
+
+// StreamRunner provides command stdout as a stream for backup payloads. Unlike
+// Runner.Run, implementations must not buffer the payload in memory and must
+// report process failures through the returned reader without exposing stderr.
+type StreamRunner interface {
+	Stream(ctx context.Context, invocation Invocation) (io.ReadCloser, error)
 }
 
 // Config contains the Restic repository and the destination configured for
@@ -181,6 +189,127 @@ func (client *Client) Restore(ctx context.Context, selection Selection) (Restore
 	return RestoreResult{Snapshot: selected, Target: client.config.TargetPath}, nil
 }
 
+// OpenBackupFile selects a snapshot and streams exactly one configured .bak
+// file from it. It uses Restic's dump command, never a shell or a
+// snapshot-wide restore. Restic's dump command writes the selected file
+// contents to stdout. The caller owns and must close the returned stream.
+func (client *Client) OpenBackupFile(ctx context.Context, selection Selection, backupPath string) (Snapshot, io.ReadCloser, error) {
+	if ctx == nil {
+		return Snapshot{}, nil, errors.New("restic: context must not be nil")
+	}
+	if !validSelection(selection) {
+		return Snapshot{}, nil, ErrInvalidSelection
+	}
+	if !validBackupPath(backupPath) {
+		return Snapshot{}, nil, ErrInvalidBackupPath
+	}
+	runner, ok := client.runner.(StreamRunner)
+	if !ok {
+		return Snapshot{}, nil, ErrStreamingUnsupported
+	}
+
+	requestContext, cancel := context.WithTimeout(ctx, client.config.Timeout)
+	fail := func(err error) (Snapshot, io.ReadCloser, error) {
+		contextErr := requestContext.Err()
+		cancel()
+		if contextErr != nil {
+			return Snapshot{}, nil, contextErr
+		}
+		return Snapshot{}, nil, err
+	}
+	if _, err := client.run(requestContext, nil, "version"); err != nil {
+		return fail(fmt.Errorf("restic preflight: %w", err))
+	}
+	snapshotOutput, err := client.run(requestContext, client.config.Environment,
+		"--repo", client.config.Repository, "snapshots", "--json")
+	if err != nil {
+		return fail(fmt.Errorf("restic snapshot listing: %w", err))
+	}
+	snapshots, err := parseSnapshots(snapshotOutput)
+	if err != nil {
+		return fail(err)
+	}
+	selected, err := selectSnapshot(snapshots, selection)
+	if err != nil {
+		return fail(err)
+	}
+	fileList, err := client.run(requestContext, client.config.Environment,
+		"--repo", client.config.Repository, "ls", "--json", selected.ID, backupPath)
+	if err != nil {
+		return fail(fmt.Errorf("restic backup path inspection: %w", err))
+	}
+	if !containsExactBackupFile(fileList, backupPath) {
+		return fail(ErrBackupNotFile)
+	}
+	stream, err := runner.Stream(requestContext, Invocation{
+		Executable:     client.config.Executable,
+		Args:           []string{"--repo", client.config.Repository, "dump", selected.ID, backupPath},
+		Environment:    append([]EnvironmentVariable(nil), client.config.Environment...),
+		MaxOutputBytes: client.config.MaxOutputBytes,
+	})
+	if err != nil || stream == nil {
+		return fail(ErrCommandFailed)
+	}
+	return selected, &operationStream{reader: stream, cancel: cancel, ctx: requestContext}, nil
+}
+
+// ErrInvalidBackupPath indicates that a requested archive path is not one
+// canonical absolute .bak file path.
+var ErrInvalidBackupPath = errors.New("restic: invalid backup file path")
+
+// ErrStreamingUnsupported indicates that a runner cannot stream the backup
+// payload without buffering it.
+var ErrStreamingUnsupported = errors.New("restic: streaming runner required")
+
+// ErrBackupNotFile indicates that Restic did not identify exactly one regular
+// file at the configured path in the selected snapshot.
+var ErrBackupNotFile = errors.New("restic: configured backup path is not one regular file")
+
+type operationStream struct {
+	reader io.ReadCloser
+	cancel context.CancelFunc
+	ctx    context.Context
+	once   sync.Once
+}
+
+func (stream *operationStream) Read(buffer []byte) (int, error) {
+	read, err := stream.reader.Read(buffer)
+	if err != nil && !errors.Is(err, io.EOF) {
+		if stream.ctx.Err() != nil {
+			return read, stream.ctx.Err()
+		}
+		return read, ErrCommandFailed
+	}
+	return read, err
+}
+
+func (stream *operationStream) Close() error {
+	stream.once.Do(func() {
+		stream.cancel()
+		_ = stream.reader.Close()
+	})
+	return nil
+}
+
+func validBackupPath(value string) bool {
+	if value == "" || len(value) > 4096 || !path.IsAbs(value) ||
+		path.Clean(value) != value || !strings.EqualFold(path.Ext(value), ".bak") ||
+		strings.ContainsAny(value, "\\*?[]{}\x00\r\n\t") {
+		return false
+	}
+	for _, component := range strings.Split(value, "/") {
+		if component == "." || component == ".." {
+			return false
+		}
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	return true
+}
+
 func (client *Client) run(ctx context.Context, environment []EnvironmentVariable, args ...string) ([]byte, error) {
 	output, err := client.runner.Run(ctx, Invocation{
 		Executable:     client.config.Executable,
@@ -231,8 +360,7 @@ func validConfig(config Config) bool {
 func allowedEnvironmentName(name string) bool {
 	switch name {
 	case "RESTIC_PASSWORD", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
-		"AWS_SESSION_TOKEN", "AWS_DEFAULT_REGION", "AWS_REGION",
-		"AWS_S3_FORCE_PATH_STYLE":
+		"AWS_SESSION_TOKEN", "AWS_DEFAULT_REGION", "AWS_REGION":
 		return true
 	default:
 		return false
@@ -252,7 +380,8 @@ func validRepository(repository string) bool {
 		endpoint, err := url.Parse(reference)
 		if err != nil || (endpoint.Scheme != "https" && endpoint.Scheme != "http") ||
 			endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" ||
-			endpoint.Fragment != "" || endpoint.Path == "" {
+			endpoint.Fragment != "" || endpoint.Path == "" ||
+			(endpoint.Scheme == "http" && !isLoopbackEndpoint(endpoint.Hostname())) {
 			return false
 		}
 	} else if strings.ContainsAny(reference, "?#") {
@@ -284,6 +413,44 @@ func validAbsoluteContainerPath(value string) bool {
 		}
 	}
 	return true
+}
+
+func containsExactBackupFile(output []byte, backupPath string) bool {
+	if len(output) == 0 || int64(len(output)) > maxOutputBytes {
+		return false
+	}
+	nodes := 0
+	for _, line := range bytes.Split(output, []byte{'\n'}) {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		if !hasUniqueJSONKeys(line) {
+			return false
+		}
+		var item struct {
+			MessageType string `json:"message_type"`
+			StructType  string `json:"struct_type"`
+			Type        string `json:"type"`
+			Path        string `json:"path"`
+		}
+		decoder := json.NewDecoder(bytes.NewReader(line))
+		if err := decoder.Decode(&item); err != nil || ensureJSONEOF(decoder) != nil {
+			return false
+		}
+		switch {
+		case item.MessageType == "snapshot" || item.StructType == "snapshot":
+			continue
+		case item.MessageType == "node" || item.StructType == "node":
+			nodes++
+			if item.Type != "file" || item.Path != backupPath {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return nodes == 1
 }
 
 func validEnvironmentName(name string) bool {

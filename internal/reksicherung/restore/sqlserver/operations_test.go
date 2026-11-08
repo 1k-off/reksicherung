@@ -286,7 +286,7 @@ func TestRestoreBackupTransfersToFixedPathAndMovesEveryFile(t *testing.T) {
 	}
 	operations := newTestOperations(t, runtime)
 
-	if err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup"))); err != nil {
+	if err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")), "Example"); err != nil {
 		t.Fatalf("RestoreBackup() error = %v", err)
 	}
 	if runtime.transferName != nativeBackupName || runtime.transferMax != maxNativeBackupBytes {
@@ -397,7 +397,7 @@ func TestValidateSingleFullBackupSetRejectsAmbiguousOrUnsupportedHeaders(t *test
 	}
 	for name, output := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := validateSingleFullBackupSet([]byte(output))
+			err := validateSingleFullBackupSet([]byte(output), "Example")
 			if name == "valid full backup" {
 				if err != nil {
 					t.Fatalf("validateSingleFullBackupSet() error = %v", err)
@@ -408,6 +408,9 @@ func TestValidateSingleFullBackupSetRejectsAmbiguousOrUnsupportedHeaders(t *test
 				t.Fatalf("validateSingleFullBackupSet() error = %v, want ErrInvalidBackupMetadata", err)
 			}
 		})
+	}
+	if err := validateSingleFullBackupSet([]byte(valid+"\n"), "DifferentDatabase"); !errors.Is(err, ErrInvalidBackupMetadata) {
+		t.Fatalf("validateSingleFullBackupSet(database mismatch) error = %v, want ErrInvalidBackupMetadata", err)
 	}
 }
 
@@ -420,7 +423,7 @@ func TestRestoreBackupRejectsMultipleSetsAndAlwaysRemovesStagedArtifact(t *testi
 		return nil, nil
 	}
 	operations := newTestOperations(t, runtime)
-	err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+	err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")), "Example")
 	if !errors.Is(err, ErrInvalidBackupMetadata) {
 		t.Fatalf("RestoreBackup() error = %v, want ErrInvalidBackupMetadata", err)
 	}
@@ -446,7 +449,7 @@ func TestRestoreBackupReportsStagedArtifactCleanupFailure(t *testing.T) {
 		}
 	}
 	operations := newTestOperations(t, runtime)
-	err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+	err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")), "Example")
 	if !errors.Is(err, ErrBackupCleanupFailed) || strings.Contains(err.Error(), "cleanup detail") {
 		t.Fatalf("RestoreBackup() error = %v, want sanitized cleanup error", err)
 	}
@@ -456,7 +459,7 @@ func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
 	t.Run("transfer failure", func(t *testing.T) {
 		runtime := &fakeRuntime{transferErr: errors.New("transfer leaked " + testPassword)}
 		operations := newTestOperations(t, runtime)
-		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")), "Example")
 		if !errors.Is(err, ErrBackupTransferFailed) || strings.Contains(err.Error(), testPassword) {
 			t.Fatalf("RestoreBackup() error = %v, want sanitized transfer failure", err)
 		}
@@ -467,7 +470,7 @@ func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
 	t.Run("sqlcmd failure", func(t *testing.T) {
 		runtime := &fakeRuntime{err: errors.New("SQL output leaked " + testPassword)}
 		operations := newTestOperations(t, runtime)
-		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")), "Example")
 		if !errors.Is(err, ErrCommandFailed) || strings.Contains(err.Error(), testPassword) ||
 			strings.Contains(err.Error(), "SQL output leaked") {
 			t.Fatalf("RestoreBackup() error = %v, want sanitized command failure", err)
@@ -482,7 +485,7 @@ func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
 			return bytes.Repeat([]byte("x"), maxOutputBytes+1), nil
 		}
 		operations := newTestOperations(t, runtime)
-		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")), "Example")
 		if !errors.Is(err, ErrOutputLimit) {
 			t.Fatalf("RestoreBackup() error = %v, want sanitized output limit", err)
 		}
@@ -518,7 +521,7 @@ func TestRestoreBackupHonorsTimeoutAndCancellation(t *testing.T) {
 			}
 			result := make(chan error, 1)
 			go func() {
-				result <- operations.RestoreBackup(ctx, io.NopCloser(strings.NewReader("backup")))
+				result <- operations.RestoreBackup(ctx, io.NopCloser(strings.NewReader("backup")), "Example")
 			}()
 			select {
 			case <-started:
@@ -551,6 +554,7 @@ func backupHeaderRow(position, backupType int) string {
 	columns := make([]string, headerOnlyColumns)
 	columns[2] = fmt.Sprint(backupType)
 	columns[5] = fmt.Sprint(position)
+	columns[9] = "Example"
 	return strings.Join(columns, "|")
 }
 

@@ -27,6 +27,27 @@ func TestValidateSpecAcceptsValidRestoreContainer(t *testing.T) {
 	}
 }
 
+func TestValidateSpecAcceptsNamedNetworkAndRejectsHostNetwork(t *testing.T) {
+	t.Parallel()
+
+	spec := Spec{
+		RunID: "run-123", Image: "restore-image@sha256:abc", Network: "restic-egress",
+		CPUs: 2, MemoryBytes: 2 * 1024 * 1024 * 1024,
+		DiskBytes: 4 * 1024 * 1024 * 1024, Timeout: time.Hour,
+	}
+	if err := ValidateSpec(spec); err != nil {
+		t.Fatalf("ValidateSpec(named network) error = %v", err)
+	}
+	spec.Network = "host"
+	if err := ValidateSpec(spec); !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("ValidateSpec(host network) error = %v, want ErrInvalidSpec", err)
+	}
+	spec.Network = "bad network"
+	if err := ValidateSpec(spec); !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("ValidateSpec(invalid network) error = %v, want ErrInvalidSpec", err)
+	}
+}
+
 func TestValidateSpecRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 

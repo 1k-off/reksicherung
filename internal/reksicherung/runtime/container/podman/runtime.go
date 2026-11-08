@@ -84,13 +84,17 @@ func (r *Runtime) Start(ctx context.Context, spec container.Spec) (container.Con
 	if err != nil {
 		return container.Container{}, fmt.Errorf("generate restore container ownership token: %w", err)
 	}
+	network := spec.Network
+	if network == "" {
+		network = "none"
+	}
 	args := []string{
 		"create",
 		"--name", name,
 		"--label", "reksicherung.managed=true",
 		"--label", "reksicherung.run-id=" + spec.RunID,
 		"--label", "reksicherung.create-token=" + createToken,
-		"--network", "none",
+		"--network", network,
 		"--cpus", strconv.FormatFloat(spec.CPUs, 'f', -1, 64),
 		"--memory", strconv.FormatInt(spec.MemoryBytes, 10),
 		"--storage-opt", "size=" + strconv.FormatInt(spec.DiskBytes, 10),
@@ -273,6 +277,78 @@ func (r *Runtime) ExecWithEnvironment(ctx context.Context, target container.Cont
 		return nil, fmt.Errorf("container command output exceeds %d bytes", maxExecOutput)
 	}
 	return output.Bytes(), nil
+}
+
+// ExecStreamWithEnvironment streams command stdout from a managed container.
+// It is intended for large, bounded archive payloads and never captures stderr.
+// Closing the returned reader cancels the Podman exec and closes its output
+// pipe; environment values remain in a short-lived mode-0600 file until exec
+// completes.
+func (r *Runtime) ExecStreamWithEnvironment(ctx context.Context, target container.Container, command []string, environment []container.EnvironmentVariable) (io.ReadCloser, error) {
+	if !validContainerHandle(target) {
+		return nil, errors.New("invalid container reference")
+	}
+	if err := validateCommand(command); err != nil {
+		return nil, err
+	}
+	if err := validateEnvironment(environment); err != nil {
+		return nil, err
+	}
+	if err := r.verifyManaged(ctx, target); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var envFile string
+	var err error
+	if len(environment) > 0 {
+		envFile, err = writeEnvironmentFile(environment)
+		if err != nil {
+			return nil, fmt.Errorf("prepare command environment: %w", err)
+		}
+	}
+
+	streamContext, cancel := context.WithCancel(ctx)
+	reader, writer := io.Pipe()
+	args := []string{"exec"}
+	if envFile != "" {
+		args = append(args, "--env-file", envFile)
+	}
+	args = append(args, target.ID)
+	args = append(args, command...)
+	go func() {
+		var runErr error
+		if runner, ok := r.runner.(stderrCommandRunner); ok {
+			runErr = runner.RunWithStderr(streamContext, r.executable, args, nil, writer, io.Discard)
+		} else {
+			runErr = r.runner.Run(streamContext, r.executable, args, nil, writer)
+		}
+		if envFile != "" {
+			if removeErr := os.Remove(envFile); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+				if runErr == nil {
+					runErr = removeErr
+				}
+			}
+		}
+		if runErr != nil {
+			_ = writer.CloseWithError(runErr)
+		} else {
+			_ = writer.Close()
+		}
+	}()
+	return &execOutputStream{ReadCloser: reader, cancel: cancel}, nil
+}
+
+type execOutputStream struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (stream *execOutputStream) Close() error {
+	stream.cancel()
+	return stream.ReadCloser.Close()
 }
 
 func (r *Runtime) verifyManaged(ctx context.Context, target container.Container) error {

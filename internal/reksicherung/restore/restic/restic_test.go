@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -20,6 +21,7 @@ const snapshotsJSON = `[
   {"id":"` + oldSnapshotID + `","short_id":"aaaaaaaa","time":"2024-01-01T00:00:00Z"},
   {"id":"` + newSnapshotID + `","short_id":"bbbbbbbb","time":"2024-02-01T00:00:00Z"}
 ]`
+const backupFileNodeJSON = `{"message_type":"node","struct_type":"node","type":"file","path":"/var/backups/sql server/db.bak"}`
 
 func TestRestoreSelectsLatestAndUsesSafeArgv(t *testing.T) {
 	t.Parallel()
@@ -91,6 +93,101 @@ func TestRestoreSelectsExplicitSnapshot(t *testing.T) {
 	}
 }
 
+func TestOpenBackupFileSelectsSnapshotAndStreamsOneExactPath(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{
+		responses:  [][]byte{[]byte("restic 0.17.3"), []byte(snapshotsJSON), []byte(backupFileNodeJSON)},
+		streamData: "large-native-backup",
+	}
+	client := newTestClient(t, runner)
+	selected, stream, err := client.OpenBackupFile(context.Background(),
+		Selection{Policy: SelectionID, ID: oldSnapshotID}, "/var/backups/sql server/db.bak")
+	if err != nil {
+		t.Fatalf("OpenBackupFile() error = %v", err)
+	}
+	defer stream.Close()
+	output, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll(stream) error = %v", err)
+	}
+	if selected.ID != oldSnapshotID || string(output) != runner.streamData {
+		t.Fatalf("selected=%#v streamed=%q", selected, output)
+	}
+	wantArgs := []string{
+		"--repo", "s3:https://objects.example.test/backups",
+		"dump", oldSnapshotID, "/var/backups/sql server/db.bak",
+	}
+	if got := runner.invocations[len(runner.invocations)-1].Args; !reflect.DeepEqual(got, wantArgs) {
+		t.Fatalf("dump argv = %#v, want %#v", got, wantArgs)
+	}
+	if strings.Contains(strings.Join(runner.invocations[len(runner.invocations)-1].Args, "\x00"), testSecret) {
+		t.Fatal("Restic password appeared in dump argv")
+	}
+}
+
+func TestOpenBackupFileRejectsUnsafePathBeforeRunning(t *testing.T) {
+	t.Parallel()
+
+	for _, backupPath := range []string{
+		"", "relative.bak", "/var/backups/../outside.bak",
+		"/var/backups/*.bak", "/var/backups/[db].bak", "/var/backups/db.bacpac",
+	} {
+		runner := &fakeRunner{}
+		client := newTestClient(t, runner)
+		if _, _, err := client.OpenBackupFile(context.Background(), Selection{Policy: SelectionLatest}, backupPath); !errors.Is(err, ErrInvalidBackupPath) {
+			t.Errorf("OpenBackupFile(path %q) error = %v, want ErrInvalidBackupPath", backupPath, err)
+		}
+		if len(runner.invocations) != 0 {
+			t.Errorf("OpenBackupFile(path %q) ran %d commands", backupPath, len(runner.invocations))
+		}
+	}
+}
+
+func TestOpenBackupFileSanitizesStreamingFailures(t *testing.T) {
+	t.Parallel()
+
+	runner := &fakeRunner{
+		responses: [][]byte{[]byte("restic"), []byte(snapshotsJSON), []byte(backupFileNodeJSON)},
+		streamErr: errors.New("private repository diagnostic " + testSecret),
+	}
+	client := newTestClient(t, runner)
+	_, _, err := client.OpenBackupFile(context.Background(), Selection{Policy: SelectionLatest}, "/var/backups/sql server/db.bak")
+	if !errors.Is(err, ErrCommandFailed) || strings.Contains(err.Error(), testSecret) {
+		t.Fatalf("OpenBackupFile() error = %v, want sanitized ErrCommandFailed", err)
+	}
+}
+
+func TestOpenBackupFileRequiresExactlyOneRegularNode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "directory", data: `{"message_type":"node","type":"dir","path":"/var/backups/sql server/db.bak"}`},
+		{name: "other path", data: `{"message_type":"node","type":"file","path":"/var/backups/other.bak"}`},
+		{name: "multiple nodes", data: `{"message_type":"node","type":"file","path":"/var/backups/sql server/db.bak"}` + "\n" +
+			`{"message_type":"node","type":"file","path":"/var/backups/sql server/child.bak"}`},
+		{name: "duplicate path key", data: `{"message_type":"node","type":"file","path":"/var/backups/sql server/db.bak","path":"/other.bak"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			runner := &fakeRunner{responses: [][]byte{
+				[]byte("restic"), []byte(snapshotsJSON), []byte(test.data),
+			}}
+			client := newTestClient(t, runner)
+			_, _, err := client.OpenBackupFile(context.Background(), Selection{Policy: SelectionLatest}, "/var/backups/sql server/db.bak")
+			if !errors.Is(err, ErrBackupNotFile) {
+				t.Fatalf("OpenBackupFile() error = %v, want ErrBackupNotFile", err)
+			}
+			if len(runner.invocations) != 3 {
+				t.Fatalf("runner calls = %d, want preflight, snapshots, and path inspection", len(runner.invocations))
+			}
+		})
+	}
+}
+
 func TestRestoreRejectsInvalidSelectionsBeforeRunning(t *testing.T) {
 	t.Parallel()
 
@@ -130,6 +227,7 @@ func TestNewRejectsUnsafeConfiguration(t *testing.T) {
 		{name: "noncanonical target", edit: func(config *Config) { config.TargetPath = "/restore//sqlserver" }},
 		{name: "repository credentials", edit: func(config *Config) { config.Repository = "s3:https://user:password@objects.example.test/backups" }},
 		{name: "repository query", edit: func(config *Config) { config.Repository = "s3:https://objects.example.test/backups?access_key=secret" }},
+		{name: "remote plaintext endpoint", edit: func(config *Config) { config.Repository = "s3:http://objects.example.test/backups" }},
 		{name: "repository option", edit: func(config *Config) { config.Repository = "--repo" }},
 		{name: "too-large output bound", edit: func(config *Config) { config.MaxOutputBytes = maxOutputBytes + 1 }},
 		{name: "unapproved environment variable", edit: func(config *Config) {
@@ -148,6 +246,16 @@ func TestNewRejectsUnsafeConfiguration(t *testing.T) {
 				t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
 			}
 		})
+	}
+}
+
+func TestNewAllowsLoopbackHTTPForLocalS3Development(t *testing.T) {
+	t.Parallel()
+
+	config := testConfig()
+	config.Repository = "s3:http://127.0.0.1:9000/backups"
+	if _, err := New(config, &fakeRunner{}); err != nil {
+		t.Fatalf("New(loopback HTTP) error = %v, want nil", err)
 	}
 }
 
@@ -281,6 +389,8 @@ type fakeRunner struct {
 	invocations    []Invocation
 	responses      [][]byte
 	errors         []error
+	streamData     string
+	streamErr      error
 	waitForContext bool
 }
 
@@ -302,4 +412,15 @@ func (runner *fakeRunner) Run(ctx context.Context, invocation Invocation) ([]byt
 		return runner.responses[index], nil
 	}
 	return nil, nil
+}
+
+func (runner *fakeRunner) Stream(_ context.Context, invocation Invocation) (io.ReadCloser, error) {
+	copied := invocation
+	copied.Args = append([]string(nil), invocation.Args...)
+	copied.Environment = append([]EnvironmentVariable(nil), invocation.Environment...)
+	runner.invocations = append(runner.invocations, copied)
+	if runner.streamErr != nil {
+		return nil, runner.streamErr
+	}
+	return io.NopCloser(strings.NewReader(runner.streamData)), nil
 }

@@ -8,16 +8,22 @@ example.
 
 Each source describes one SQL Server backup, a GoBackup or Restic adapter, an
 S3-compatible repository, and the policy and bounded resources for a restore
-check. Restic sources require `repositoryPasswordRef`; GoBackup sources reject
-that field. It is the OpenBao secret reference for the Restic repository
-password, not a password value or a repository URL. Secret fields are
-references only and are validated without resolving them. Literal credential
-keys are rejected as unknown YAML fields.
+check. Restic sources require `repositoryPasswordRef` and `backupPath`;
+GoBackup sources reject both fields. `backupPath` is one exact, absolute,
+canonical `.bak` file path inside the selected Restic snapshot. It cannot
+contain traversal or glob syntax, and the pipeline uses it as a single argv
+element to `restic dump` rather than restoring a snapshot tree. Restic
+writes the selected file contents to command stdout, which is streamed to SQL
+Server's fixed backup location.
+`repositoryPasswordRef` is the OpenBao secret reference for the Restic
+repository password, not a password value or a repository URL. Secret fields
+are references only and are validated without resolving them. Literal
+credential keys are rejected as unknown YAML fields.
 
-`repositoryPasswordRef` is operational configuration and is never copied into
-the Airon inventory. This catalog field does not derive or alter the Restic
-repository URL; repository coordinates remain represented by the existing
-S3 storage fields.
+`repositoryPasswordRef` and `backupPath` are operational configuration and are
+never copied into the Airon inventory. The Restic repository address is built
+from `storage.endpoint`, `bucket`, and `prefix`; resolved credentials are
+provided to the restore pipeline by its caller and are not part of the URL.
 
 Current limits are deliberate: only SQL Server and S3 are supported; backup
 selection is either `latest` or an explicit provider backup ID; cleanup is

@@ -5,6 +5,8 @@ backups:
     provider: restic
     repositoryPasswordRef: openbao://secret/reksicherung/restic#repository-password
     backupName: example-production
+    # Exact absolute path of one native SQL Server .bak file in each snapshot.
+    backupPath: /var/opt/mssql/backup/example-production.bak
     database:
       type: sqlserver
       name: Example

@@ -3,6 +3,8 @@ package podman
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/restic"
@@ -47,6 +49,49 @@ func TestRunnerExecutesArgumentVectorWithSeparateEnvironment(t *testing.T) {
 	for _, argument := range runtime.command {
 		if argument == secret {
 			t.Fatal("secret was included in argv")
+		}
+	}
+}
+
+func TestRunnerStreamsBackupOutputWithSeparateEnvironment(t *testing.T) {
+	t.Parallel()
+
+	const secret = "streamed-restic-password"
+	runtime := &fakeRuntime{streamOutput: "native backup contents"}
+	target := container.Container{
+		ID: "0123456789abcdef", Name: container.ContainerName("run-123"), RunID: "run-123",
+	}
+	runner, err := New(runtime, target)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	stream, err := runner.Stream(context.Background(), restic.Invocation{
+		Executable:     "restic",
+		Args:           []string{"--repo", "s3:bucket/repo", "dump", strings.Repeat("a", 64), "/backup/db.bak"},
+		Environment:    []restic.EnvironmentVariable{{Name: "RESTIC_PASSWORD", Value: secret}},
+		MaxOutputBytes: 1024,
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	defer stream.Close()
+	output, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll(stream) error = %v", err)
+	}
+	if string(output) != runtime.streamOutput || runtime.target != target {
+		t.Fatalf("stream output=%q target=%#v", output, runtime.target)
+	}
+	if len(runtime.command) != 6 || runtime.command[0] != "restic" ||
+		runtime.command[3] != "dump" || runtime.command[5] != "/backup/db.bak" {
+		t.Fatalf("stream command = %#v", runtime.command)
+	}
+	if len(runtime.environment) != 1 || runtime.environment[0] != (container.EnvironmentVariable{Name: "RESTIC_PASSWORD", Value: secret}) {
+		t.Fatalf("stream environment = %#v", runtime.environment)
+	}
+	for _, argument := range runtime.command {
+		if argument == secret {
+			t.Fatal("Restic password appeared in command argv")
 		}
 	}
 }
@@ -98,11 +143,12 @@ func TestNewRejectsMissingRuntimeOrContainer(t *testing.T) {
 }
 
 type fakeRuntime struct {
-	target      container.Container
-	command     []string
-	environment []container.EnvironmentVariable
-	output      []byte
-	err         error
+	target       container.Container
+	command      []string
+	environment  []container.EnvironmentVariable
+	output       []byte
+	streamOutput string
+	err          error
 }
 
 func (runtime *fakeRuntime) ExecWithEnvironment(_ context.Context, target container.Container, command []string, environment []container.EnvironmentVariable) ([]byte, error) {
@@ -110,6 +156,16 @@ func (runtime *fakeRuntime) ExecWithEnvironment(_ context.Context, target contai
 	runtime.command = append([]string(nil), command...)
 	runtime.environment = append([]container.EnvironmentVariable(nil), environment...)
 	return runtime.output, runtime.err
+}
+
+func (runtime *fakeRuntime) ExecStreamWithEnvironment(_ context.Context, target container.Container, command []string, environment []container.EnvironmentVariable) (io.ReadCloser, error) {
+	runtime.target = target
+	runtime.command = append([]string(nil), command...)
+	runtime.environment = append([]container.EnvironmentVariable(nil), environment...)
+	if runtime.err != nil {
+		return nil, runtime.err
+	}
+	return io.NopCloser(strings.NewReader(runtime.streamOutput)), nil
 }
 
 func contains(value, substring string) bool {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 	"unicode"
@@ -36,6 +37,7 @@ type BackupSource struct {
 	Provider              string            `yaml:"provider"`
 	RepositoryPasswordRef string            `yaml:"repositoryPasswordRef,omitempty"`
 	BackupName            string            `yaml:"backupName"`
+	BackupPath            string            `yaml:"backupPath,omitempty"`
 	Database              Database          `yaml:"database"`
 	Storage               S3Storage         `yaml:"storage"`
 	Selection             Selection         `yaml:"selection"`
@@ -163,8 +165,13 @@ func (backup BackupSource) validate() error {
 		if _, err := secrets.ParseReference(backup.RepositoryPasswordRef); err != nil {
 			return errors.New("repositoryPasswordRef must be a valid secret reference for Restic")
 		}
+		if err := validateResticBackupPath(backup.BackupPath); err != nil {
+			return err
+		}
 	} else if backup.RepositoryPasswordRef != "" {
 		return errors.New("repositoryPasswordRef is only valid for Restic")
+	} else if backup.BackupPath != "" {
+		return errors.New("backupPath is only valid for Restic")
 	}
 	if !validName(backup.BackupName) {
 		return errors.New("backupName must be a non-empty printable name of at most 256 characters")
@@ -198,6 +205,26 @@ func (backup BackupSource) validate() error {
 	}
 	if backup.Cleanup != "delete" && backup.Cleanup != "hold_for_review" {
 		return errors.New("cleanup must be delete or hold_for_review")
+	}
+	return nil
+}
+
+func validateResticBackupPath(value string) error {
+	if value == "" || len(value) > 4096 || !strings.HasPrefix(value, "/") ||
+		strings.TrimSpace(value) != value || path.Clean(value) != value ||
+		!strings.EqualFold(path.Ext(value), ".bak") ||
+		strings.ContainsAny(value, "\\*?[]{}\x00\r\n\t") {
+		return errors.New("backupPath must be an exact absolute .bak path without traversal or glob characters")
+	}
+	for _, component := range strings.Split(value, "/") {
+		if component == "." || component == ".." {
+			return errors.New("backupPath must not contain dot or parent path segments")
+		}
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
+			return errors.New("backupPath must be printable")
+		}
 	}
 	return nil
 }

@@ -169,6 +169,39 @@ func TestCatalogValidationRejectsUnsafeOrIncompleteValues(t *testing.T) {
 			want: "repositoryPasswordRef",
 		},
 		{
+			name: "Restic requires an exact backup path",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Provider = "restic"
+				catalog.Backups[0].RepositoryPasswordRef = "openbao://secret/reksicherung/restic#repository-password"
+			},
+			want: "backupPath",
+		},
+		{
+			name: "Restic path traversal",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Provider = "restic"
+				catalog.Backups[0].RepositoryPasswordRef = "openbao://secret/reksicherung/restic#repository-password"
+				catalog.Backups[0].BackupPath = "/var/backups/../private.bak"
+			},
+			want: "backupPath",
+		},
+		{
+			name: "Restic glob path",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Provider = "restic"
+				catalog.Backups[0].RepositoryPasswordRef = "openbao://secret/reksicherung/restic#repository-password"
+				catalog.Backups[0].BackupPath = "/var/backups/*.bak"
+			},
+			want: "backupPath",
+		},
+		{
+			name: "GoBackup rejects Restic backup path",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].BackupPath = "/var/backups/db.bak"
+			},
+			want: "only valid for Restic",
+		},
+		{
 			name: "GoBackup rejects repository password reference",
 			mutate: func(catalog *Catalog) {
 				catalog.Backups[0].RepositoryPasswordRef = "openbao://secret/reksicherung/restic#repository-password"

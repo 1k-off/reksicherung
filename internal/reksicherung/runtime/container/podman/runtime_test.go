@@ -501,6 +501,41 @@ func TestTransferCleansPartialFileWhenSourceIsCanceled(t *testing.T) {
 	}
 }
 
+func TestExecStreamWithEnvironmentStreamsOutputAndRemovesSecretFile(t *testing.T) {
+	t.Parallel()
+
+	const secret = "stream-only-restic-secret"
+	runner := &fakeRunner{outputs: map[string]string{"exec": "large archive payload"}}
+	runtime := &Runtime{executable: "podman", runner: runner}
+	stream, err := runtime.ExecStreamWithEnvironment(context.Background(), testContainerRef(),
+		[]string{"restic", "--repo", "s3:bucket", "dump", strings.Repeat("a", 64), "/backup/db.bak"},
+		[]container.EnvironmentVariable{{Name: "RESTIC_PASSWORD", Value: secret}})
+	if err != nil {
+		t.Fatalf("ExecStreamWithEnvironment() error = %v", err)
+	}
+	output, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("ReadAll(stream) error = %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("stream.Close() error = %v", err)
+	}
+	if string(output) != "large archive payload" {
+		t.Fatalf("stream output = %q", output)
+	}
+	if !strings.Contains(runner.envFileContents, "RESTIC_PASSWORD="+secret+"\n") {
+		t.Fatal("temporary environment file omitted Restic password")
+	}
+	if strings.Contains(fmt.Sprint(runner.calls), secret) {
+		t.Fatal("Restic secret appeared in Podman argv")
+	}
+	execCall := runner.calls[len(runner.calls)-1]
+	envPath := valueAfterTest(execCall.args, "--env-file")
+	if _, err := os.Stat(envPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("temporary Restic environment file still exists: stat error = %v", err)
+	}
+}
+
 func TestTransferClosesBlockedSourceOnCancellation(t *testing.T) {
 	t.Parallel()
 

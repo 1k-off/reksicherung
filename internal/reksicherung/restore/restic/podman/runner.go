@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/restic"
 	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
@@ -18,6 +19,10 @@ const maxOutputBytes = 4 << 20
 // commandRuntime is the subset of the container runtime required by Runner.
 type commandRuntime interface {
 	ExecWithEnvironment(context.Context, container.Container, []string, []container.EnvironmentVariable) ([]byte, error)
+}
+
+type streamCommandRuntime interface {
+	ExecStreamWithEnvironment(context.Context, container.Container, []string, []container.EnvironmentVariable) (io.ReadCloser, error)
 }
 
 // Runner executes Restic inside one already-started restore container.
@@ -58,4 +63,27 @@ func (runner *Runner) Run(ctx context.Context, invocation restic.Invocation) ([]
 		return nil, restic.ErrOutputLimit
 	}
 	return output, nil
+}
+
+// Stream executes a Restic command whose stdout is a large archive payload.
+// The runtime must stream it without buffering, and the caller must close the
+// returned reader to cancel the command and release its environment file.
+func (runner *Runner) Stream(ctx context.Context, invocation restic.Invocation) (io.ReadCloser, error) {
+	streamRuntime, ok := runner.runtime.(streamCommandRuntime)
+	if !ok || invocation.Executable == "" || invocation.MaxOutputBytes <= 0 || invocation.MaxOutputBytes > maxOutputBytes {
+		return nil, restic.ErrInvalidConfig
+	}
+	command := make([]string, 1, len(invocation.Args)+1)
+	command[0] = invocation.Executable
+	command = append(command, invocation.Args...)
+
+	environment := make([]container.EnvironmentVariable, len(invocation.Environment))
+	for index, variable := range invocation.Environment {
+		environment[index] = container.EnvironmentVariable{Name: variable.Name, Value: variable.Value}
+	}
+	stream, err := streamRuntime.ExecStreamWithEnvironment(ctx, runner.target, command, environment)
+	if err != nil {
+		return nil, restic.ErrCommandFailed
+	}
+	return stream, nil
 }
