@@ -147,6 +147,7 @@ func TestPipelineCleansAutomaticContainersAfterEveryPostStartFailure(t *testing.
 		{name: "open", failAt: "open", wantEvent: "open GoBackup archive failed"},
 		{name: "import", failAt: "import", wantEvent: "import GoBackup BACPAC failed"},
 		{name: "integrity", failAt: "integrity", wantEvent: "DBCC CHECKDB command failed"},
+		{name: "integrity not completed", failAt: "integrity_incomplete", wantEvent: "DBCC CHECKDB command did not complete"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -166,6 +167,9 @@ func TestPipelineCleansAutomaticContainersAfterEveryPostStartFailure(t *testing.
 			}
 			if test.failAt == "integrity" {
 				operations.integrityErr = errors.New("DBCC diagnostic contains " + pipelineTestSecret)
+			}
+			if test.failAt == "integrity_incomplete" {
+				operations.integrityIncomplete = true
 			}
 			pipeline := newPipelineTest(t, runtime, repository, importer, operations)
 
@@ -582,10 +586,11 @@ func (importer *pipelineTestImporter) Import(_ context.Context, _ container.Cont
 }
 
 type pipelineTestOperations struct {
-	events       *[]string
-	readyErr     error
-	integrityErr error
-	wait         func(context.Context) error
+	events              *[]string
+	readyErr            error
+	integrityErr        error
+	integrityIncomplete bool
+	wait                func(context.Context) error
 }
 
 func (operations *pipelineTestOperations) WaitReady(ctx context.Context) error {
@@ -601,7 +606,7 @@ func (operations *pipelineTestOperations) CheckIntegrity(context.Context) (sqlse
 	if operations.integrityErr != nil {
 		return sqlserverrestore.IntegrityResult{}, operations.integrityErr
 	}
-	return sqlserverrestore.IntegrityResult{CommandCompleted: true}, nil
+	return sqlserverrestore.IntegrityResult{CommandCompleted: !operations.integrityIncomplete}, nil
 }
 
 type pipelineTestRuntime struct {

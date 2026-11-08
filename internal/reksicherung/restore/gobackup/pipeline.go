@@ -387,12 +387,16 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "dbcc_checkdb", evidence.StatusStarted, map[string]string{"check_name": "DBCC_CHECKDB"}, "", 0); err != nil {
 		return result, err
 	}
-	_, err = operations.CheckIntegrity(operationCtx)
+	integrityResult, err := operations.CheckIntegrity(operationCtx)
 	if err != nil {
 		if operationCtx.Err() != nil {
 			return result, finishFailedStep(ctx, request, "dbcc_checkdb", dbccStarted, operationCtx.Err(), map[string]string{"check_name": "DBCC_CHECKDB"})
 		}
 		return result, finishFailedStep(ctx, request, "dbcc_checkdb", dbccStarted, errors.New("DBCC CHECKDB command failed"), map[string]string{"check_name": "DBCC_CHECKDB"})
+	}
+	if !integrityResult.CommandCompleted {
+		return result, finishFailedStep(ctx, request, "dbcc_checkdb", dbccStarted,
+			errors.New("DBCC CHECKDB command did not complete"), map[string]string{"check_name": "DBCC_CHECKDB"})
 	}
 	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "dbcc_checkdb", evidence.StatusSucceeded, map[string]string{
 		"check_name": "DBCC_CHECKDB",
