@@ -33,6 +33,16 @@ Airon prompt execution can stop on a failed step, so an MCP cleanup prompt is
 not a reliable `finally` mechanism. The external service must own durable
 cleanup and reconciliation; do not claim Airon guarantees final cleanup.
 
+There is also a workflow-boundary mismatch for AI-assisted restore validation.
+Airon issues MCP calls only while executing an LLM prompt, and the MCP server
+does not receive control to ask Airon to run another prompt. Therefore a single
+synchronous high-level restore-check MCP call cannot restore a database, pause
+to have Airon inspect it through SQL tools, and then resume cleanup in the same
+call. Airon can order prompt steps, but it does not currently provide a
+declarative non-LLM tool invocation or an unconditional finalizer. Do not hide
+this limitation behind prompt wording or claim that a cleanup prompt is
+reliable.
+
 ### Required work
 
 1. Inspect the current public `Run` API, MCP client wrappers, and JSON run-log
@@ -70,6 +80,18 @@ cleanup and reconciliation; do not claim Airon guarantees final cleanup.
 7. Update Airon's user documentation and public API comments. Include a minimal
    example showing how an external system can correlate MCP calls and consume
    the optional run result without coupling Airon to that system.
+8. Resolve the workflow-boundary mismatch with a generic Airon capability, not
+   a Reksicherung-specific dependency. Inspect and document a viable contract
+   for a job that needs deterministic preparation, a model-driven MCP
+   inspection phase, and deterministic result handoff. Preserve the external
+   service as owner of durable resources and cleanup. If Airon cannot safely
+   provide a single-call nested model phase, define a generic multi-step or
+   resumable job contract and state explicitly that the caller must coordinate
+   phases; do not imply that one blocking MCP handler can invoke Airon midway.
+   Add tests proving the chosen phase ordering and behavior on prompt failure,
+   cancellation, and process restart. The external service's lease/reconciler
+   must remain sufficient to clean up even when Airon never executes a later
+   phase.
 
 ### Constraints and acceptance
 
