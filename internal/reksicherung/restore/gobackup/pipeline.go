@@ -398,6 +398,10 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 		return result, finishFailedStep(ctx, request, "dbcc_checkdb", dbccStarted,
 			errors.New("DBCC CHECKDB command did not complete"), map[string]string{"check_name": "DBCC_CHECKDB"})
 	}
+	if integrityResult.Database != database {
+		return result, finishFailedStep(ctx, request, "dbcc_checkdb", dbccStarted,
+			errors.New("DBCC CHECKDB reported an unexpected target"), map[string]string{"check_name": "DBCC_CHECKDB"})
+	}
 	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "dbcc_checkdb", evidence.StatusSucceeded, map[string]string{
 		"check_name": "DBCC_CHECKDB",
 		"outcome":    "command_completed",

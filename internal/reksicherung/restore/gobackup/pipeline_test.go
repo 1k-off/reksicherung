@@ -148,6 +148,7 @@ func TestPipelineCleansAutomaticContainersAfterEveryPostStartFailure(t *testing.
 		{name: "import", failAt: "import", wantEvent: "import GoBackup BACPAC failed"},
 		{name: "integrity", failAt: "integrity", wantEvent: "DBCC CHECKDB command failed"},
 		{name: "integrity not completed", failAt: "integrity_incomplete", wantEvent: "DBCC CHECKDB command did not complete"},
+		{name: "integrity wrong target", failAt: "integrity_wrong_target", wantEvent: "DBCC CHECKDB reported an unexpected target"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -170,6 +171,9 @@ func TestPipelineCleansAutomaticContainersAfterEveryPostStartFailure(t *testing.
 			}
 			if test.failAt == "integrity_incomplete" {
 				operations.integrityIncomplete = true
+			}
+			if test.failAt == "integrity_wrong_target" {
+				operations.integrityWrongTarget = true
 			}
 			pipeline := newPipelineTest(t, runtime, repository, importer, operations)
 
@@ -586,11 +590,12 @@ func (importer *pipelineTestImporter) Import(_ context.Context, _ container.Cont
 }
 
 type pipelineTestOperations struct {
-	events              *[]string
-	readyErr            error
-	integrityErr        error
-	integrityIncomplete bool
-	wait                func(context.Context) error
+	events               *[]string
+	readyErr             error
+	integrityErr         error
+	integrityIncomplete  bool
+	integrityWrongTarget bool
+	wait                 func(context.Context) error
 }
 
 func (operations *pipelineTestOperations) WaitReady(ctx context.Context) error {
@@ -606,7 +611,14 @@ func (operations *pipelineTestOperations) CheckIntegrity(context.Context) (sqlse
 	if operations.integrityErr != nil {
 		return sqlserverrestore.IntegrityResult{}, operations.integrityErr
 	}
-	return sqlserverrestore.IntegrityResult{CommandCompleted: !operations.integrityIncomplete}, nil
+	database, _ := sqlserverrestore.DatabaseNameForRun(pipelineTestRunID)
+	if operations.integrityWrongTarget {
+		database = "different_database"
+	}
+	return sqlserverrestore.IntegrityResult{
+		Database:         database,
+		CommandCompleted: !operations.integrityIncomplete,
+	}, nil
 }
 
 type pipelineTestRuntime struct {
