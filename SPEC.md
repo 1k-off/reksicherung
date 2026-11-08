@@ -326,23 +326,16 @@ The initial design does not require cryptographic evidence signing or encrypted 
 - Keep Airon JSON and Reksicherung evidence correlated by run ID. No tamper-proofing or encrypted ephemeral disk requirement.
 - The initial `BackupCatalog` schema and secret-free Airon inventory are described in `docs/decisions/0001-catalog-config-and-inventory.md`.
 
-## 18. Open decisions before implementation
+## 18. Operational baselines (resolved for production packaging)
 
-- Stable `v1` YAML schema and migration policy beyond the initial `v1alpha1` catalog.
-- Run-registry storage choice, lease/expiry policy, and reconciliation interval for abandoned temporary environments.
-- OpenBao operational model and proof of concept: deployment footprint, initialization/unseal, authentication, persistence, backup, and recovery.
-- Secret-reference syntax and credential renewal/rotation behavior.
-- Image build/distribution policy and exact isolation controls.
-- Supported S3-compatible implementations and required object-store operations.
-- Exact run-plan fields and how prompt instructions map to scope, order/concurrency, and error handling.
-- Backup selection policy: newest, scheduled point, explicit ID, or a configurable combination.
-- SQL Server database licensing/configuration and supported image architecture.
-- Default `DBCC CHECKDB` options, timeout, and resource limits.
-- Optional per-database syntax for documenting known-empty tables and warning details.
-- Read-only SQL query constraints, result redaction, and limits for AI-assisted semantic checks.
-- Human-review access policy and any optional retention/expiry behavior.
-- Evidence schema, output destination, retention, and redaction rules.
-- Exact retry limits/backoff for transient/idempotent operations.
-- Synthetic SQL Server backup fixture and S3-compatible test endpoint for end-to-end validation.
+- Catalog schema remains `reksicherung.io/v1alpha1` until a separate `v1` migration ADR.
+- Run registry is bbolt on an operator-mounted volume; reconciler default interval is 30s; cleanup is database-scoped only.
+- OpenBao is operator-deployed with persistent storage; MCP processes use a token/AppRole valid for process lifetime (no in-process renewal yet). Reference syntax: `openbao://<mount>/<path>#<key>`.
+- Images are built from `deploy/docker/`; production must pin digests. SQL Server / MCP / OpenBao isolation and network policy are operator-owned.
+- First storage backend is S3-compatible object storage; Restic repositories use the same credential-reference model.
+- Backup selection: `latest` or explicit ID in catalog; run plans are validated via `internal/reksicherung/plan`.
+- Integrity check: fixed non-repair `DBCC CHECKDB` with package timeouts; semantic review uses bounded read-only SQL MCP tools.
+- `hold_for_review` access/TTL is an operator policy (see `docs/operations.md`); evidence contract is in `docs/evidence.md`.
+- E2E release gate lives under `test/e2e` (`go:build e2e`) against operator-started services and synthetic fixtures.
 
-Resolve these as short architecture decisions before committing implementation interfaces that would make them expensive to change.
+Remaining Airon-platform work (MCP `_meta` run-ID injection and durable log handoff) is tracked in `docs/airon-integration-follow-up.md` and does not block compose-based production packaging of Reksicherung itself.

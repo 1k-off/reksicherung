@@ -8,9 +8,10 @@ operator's Compose configuration.
 
 ## Tools
 
-- `sqlserver_restore_backup` accepts an opaque artifact ID from
-  `gobackup_stage_artifact`, confirms the `.bak` header matches the requested
-  source database, and restores it to a name derived from the Airon run ID.
+- `sqlserver_restore_backup` accepts an opaque artifact ID from a provider
+  stage tool. For `.bak` it confirms the header matches `source_database` and
+  restores into a run-derived database. For `.bacpac` it imports with local
+  `sqlpackage` into the same run-derived database.
 - `sqlserver_check_restore_integrity` runs fixed, non-repair `DBCC CHECKDB`.
   `command_completed: true` means only that sqlcmd completed without an error;
   it is **not** a clean-integrity verdict.
@@ -40,11 +41,9 @@ changing permissions at runtime. `REKSICHERUNG_SQLSERVER_DATA_DIR` is the
 absolute data directory as seen **inside SQL Server**; it need not be mounted
 into the MCP process.
 
-The GoBackup stage tool recognizes plain backup files and arbitrarily nested,
-bounded ZIP, tar, or gzip-tar wrappers. It does not extract member paths to
-disk; it resolves exactly one `.bak` or BACPAC database artifact. This SQL
-Server MCP currently restores native `.bak` artifacts only. BACPAC imports
-are rejected rather than misreported as native restores.
+Provider stage tools recognize plain backup files and nested ZIP/tar/gzip-tar
+wrappers, resolving exactly one `.bak` or `.bacpac`. This restore MCP supports
+both kinds.
 
 ## Configuration
 
@@ -62,6 +61,7 @@ Required environment:
 Optional:
 
 - `REKSICHERUNG_SQLCMD`: sqlcmd executable, default `sqlcmd`.
+- `REKSICHERUNG_SQLPACKAGE`: sqlpackage executable, default `sqlpackage`.
 - `REKSICHERUNG_ARTIFACT_MAX_BYTES`: maximum staged/native backup size, default
   200 GiB and hard-capped at 1 TiB. Set a smaller value for test environments
   with a known disk budget.

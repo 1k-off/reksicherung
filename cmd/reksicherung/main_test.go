@@ -88,12 +88,12 @@ func TestCLIProductionRequiresHTTPSStorage(t *testing.T) {
 	}
 }
 
-func TestCLIHelpOnlyAdvertisesCatalogCommands(t *testing.T) {
+func TestCLIHelpDoesNotAdvertiseContainerEngines(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if err := run(context.Background(), []string{"help"}, &stdout, &stderr); err != nil {
 		t.Fatalf("run(help) error = %v", err)
 	}
-	for _, forbidden := range []string{"cleanup", "reconcile", "podman", "container"} {
+	for _, forbidden := range []string{"podman", "docker compose", "remove container"} {
 		if strings.Contains(strings.ToLower(stdout.String()), forbidden) {
 			t.Errorf("help advertises engine management %q: %s", forbidden, stdout.String())
 		}
@@ -104,9 +104,8 @@ func TestCLIRejectsMissingConfigAndUnexpectedArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"validate"},
 		{"catalog", "-config", "somewhere.yaml", "extra"},
-		{"cleanup", "-registry", "runs.db", "-run-id", "run-123"},
+		{"cleanup"},
 		{"reconcile"},
-		{"reconcile", "-registry", "runs.db", "-interval", "500ms"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if err := run(context.Background(), args, &stdout, &stderr); err == nil {

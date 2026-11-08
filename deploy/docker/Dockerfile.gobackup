@@ -1,0 +1,12 @@
+# syntax=docker/dockerfile:1.7
+FROM golang:1.23-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/reksicherung-mcp-gobackup ./cmd/reksicherung-mcp-gobackup
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/reksicherung-mcp-gobackup /usr/local/bin/reksicherung-mcp-gobackup
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/reksicherung-mcp-gobackup"]

@@ -1,39 +1,164 @@
-# Reference operator deployment. Reksicherung does not start these services
-# itself; Airon and operators do. Replace secrets, images digests, and network
-# policy before production use.
+# Production-oriented operator stack. Build images from the repository root:
+#   docker compose -f examples/compose/docker-compose.yml build
+# Initialize OpenBao, load KV secrets, create the SQL restore login, then start.
+#
+# Network isolation is operator-owned: do not attach this network to production
+# database services. Pin image digests before production promotion.
+
+name: reksicherung
+
 services:
   openbao:
     image: openbao/openbao:2.1.0
-    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200", "-dev-root-token-id=dev-only-change-me"]
+    command: ["server", "-config=/vault/config/config.hcl"]
+    volumes:
+      - ./openbao/config.hcl:/vault/config/config.hcl:ro
+      - openbao-data:/vault/file
     ports:
       - "127.0.0.1:8200:8200"
     networks: [reksicherung]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
 
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
     environment:
       ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "ChangeMe_DevOnly_123"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
     volumes:
       - sql-data:/var/opt/mssql/data
       - sql-backup:/var/opt/mssql/backup
     networks: [reksicherung]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    # Do not publish 1433 on the host in production.
 
-  # Build/run MCP binaries on the host or in your own images that include
-  # sqlcmd, sqlpackage, restic, and the reksicherung binaries. Shared volumes
-  # must be the same paths configured via REKSICHERUNG_* environment variables.
-  artifact-stage:
-    image: busybox:1.36
-    command: ["sh", "-c", "mkdir -p /stage /backup && sleep infinity"]
+  gobackup-mcp:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.gobackup
+    image: reksicherung/mcp-gobackup:local
+    environment:
+      REKSICHERUNG_GOBACKUP_S3_ENDPOINT: ${REKSICHERUNG_GOBACKUP_S3_ENDPOINT}
+      REKSICHERUNG_GOBACKUP_S3_REGION: ${REKSICHERUNG_GOBACKUP_S3_REGION}
+      REKSICHERUNG_GOBACKUP_S3_BUCKET: ${REKSICHERUNG_GOBACKUP_S3_BUCKET}
+      REKSICHERUNG_GOBACKUP_S3_PREFIX: ${REKSICHERUNG_GOBACKUP_S3_PREFIX}
+      REKSICHERUNG_GOBACKUP_S3_ACCESS_KEY_REF: ${REKSICHERUNG_GOBACKUP_S3_ACCESS_KEY_REF}
+      REKSICHERUNG_GOBACKUP_S3_SECRET_KEY_REF: ${REKSICHERUNG_GOBACKUP_S3_SECRET_KEY_REF}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR}
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES}
     volumes:
-      - artifact-stage:/stage
-      - sql-backup:/backup
+      - artifact-stage:/var/lib/reksicherung/artifacts
     networks: [reksicherung]
+    stdin_open: true
+    restart: unless-stopped
+    profiles: ["mcp-stdio"]
+
+  restic-mcp:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.restic
+    image: reksicherung/mcp-restic:local
+    environment:
+      REKSICHERUNG_RESTIC_REPOSITORY: ${REKSICHERUNG_RESTIC_REPOSITORY}
+      REKSICHERUNG_RESTIC_PASSWORD_REF: ${REKSICHERUNG_RESTIC_PASSWORD_REF}
+      REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF: ${REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF}
+      REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF: ${REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR}
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES}
+    volumes:
+      - artifact-stage:/var/lib/reksicherung/artifacts
+    networks: [reksicherung]
+    stdin_open: true
+    restart: unless-stopped
+    profiles: ["mcp-stdio"]
+
+  sqlserver-restore-mcp:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.sqlserver-restore
+    image: reksicherung/mcp-sqlserver-restore:local
+    environment:
+      REKSICHERUNG_SQLSERVER_ADDRESS: tcp:sqlserver,1433
+      REKSICHERUNG_SQLSERVER_RESTORE_USERNAME: ${REKSICHERUNG_SQLSERVER_RESTORE_USERNAME}
+      REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF: ${REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR}
+      REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR}
+      REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR}
+      REKSICHERUNG_SQLCMD: sqlcmd
+      REKSICHERUNG_SQLPACKAGE: sqlpackage
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES}
+    volumes:
+      - artifact-stage:/var/lib/reksicherung/artifacts
+      - sql-backup:/var/opt/mssql/backup
+    networks: [reksicherung]
+    stdin_open: true
+    restart: unless-stopped
+    profiles: ["mcp-stdio"]
+    depends_on: [sqlserver, openbao]
+
+  sqlserver-inspect-mcp:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.sqlserver-inspect
+    image: reksicherung/mcp-sqlserver-inspect:local
+    environment:
+      # Set per-run by Airon after restore derives the database name.
+      REKSICHERUNG_SQLSERVER_DSN: ${REKSICHERUNG_SQLSERVER_DSN:-}
+      REKSICHERUNG_SQLSERVER_DATABASE: ${REKSICHERUNG_SQLSERVER_DATABASE:-}
+    networks: [reksicherung]
+    stdin_open: true
+    restart: unless-stopped
+    profiles: ["mcp-stdio"]
+    depends_on: [sqlserver]
+
+  cleanup-reconciler:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.cli
+    image: reksicherung/cli:local
+    command: ["reconcile", "-registry", "/var/lib/reksicherung/runs/runs.db", "-interval", "30s"]
+    environment:
+      REKSICHERUNG_SQLSERVER_ADDRESS: tcp:sqlserver,1433
+      REKSICHERUNG_SQLSERVER_RESTORE_USERNAME: ${REKSICHERUNG_SQLSERVER_RESTORE_USERNAME}
+      REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF: ${REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR}
+      REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR}
+      REKSICHERUNG_SQLCMD: sqlcmd
+    volumes:
+      - run-registry:/var/lib/reksicherung/runs
+      - sql-backup:/var/opt/mssql/backup
+    networks: [reksicherung]
+    restart: unless-stopped
+    depends_on: [sqlserver, openbao]
 
 networks:
   reksicherung:
+    driver: bridge
+    # Do not mark this network internal: MCP processes need egress to S3/OpenBao.
+    # Keep SQL Server unpublished and firewalled from production DB networks.
 
 volumes:
+  openbao-data:
   sql-data:
   sql-backup:
   artifact-stage:
+  run-registry:

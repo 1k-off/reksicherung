@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+FROM golang:1.23-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/reksicherung ./cmd/reksicherung
+
+FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-bookworm-slim
+USER root
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl apt-transport-https gnupg ca-certificates \
+  && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
+  && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" \
+    > /etc/apt/sources.list.d/mssql-release.list \
+  && apt-get update \
+  && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 mssql-tools18 \
+  && ln -s /opt/mssql-tools18/bin/sqlcmd /usr/local/bin/sqlcmd \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/reksicherung /usr/local/bin/reksicherung
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/reksicherung"]

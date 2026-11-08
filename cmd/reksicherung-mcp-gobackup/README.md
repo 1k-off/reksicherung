@@ -17,8 +17,7 @@ The tools are:
 - `gobackup_stage_artifact`: read one selected object, resolve one plain or
   nested `.bak`/BACPAC through bounded ZIP, tar, and gzip-tar wrappers, and
   save it under an opaque stage ID. The response contains only that ID, kind,
-  and size. The SQL Server restore MCP consumes native `.bak` artifacts.
-  BACPACs are identified but not accepted by the native restore tool.
+  and size. The SQL Server restore MCP consumes `.bak` and `.bacpac` artifacts.
 
 The service's listing is independently capped at 1,000 objects, 10 pages, and
 100 entries per page. When those bounds prevent a complete listing, the tool

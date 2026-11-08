@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1.7
+FROM golang:1.23-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/reksicherung-mcp-restic ./cmd/reksicherung-mcp-restic
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 \
+  && curl -fsSL https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_amd64.bz2 \
+    | bunzip2 > /usr/local/bin/restic \
+  && chmod 0755 /usr/local/bin/restic \
+  && apt-get purge -y curl bzip2 \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/reksicherung-mcp-restic /usr/local/bin/reksicherung-mcp-restic
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/reksicherung-mcp-restic"]
