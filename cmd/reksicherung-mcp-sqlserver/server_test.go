@@ -103,6 +103,7 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 			Truncated: false,
 		},
 		validation: sqlserver.ValidationResult{ObservedRows: 2, Limit: 2, Truncated: true},
+		integrity:  sqlserver.IntegrityResult{Completed: true},
 	}
 	client, closeSessions := connectMCPTestClient(t, fake, "RestoredDb")
 	defer closeSessions()
@@ -121,6 +122,7 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 		}
 	}
 	wantNames := []string{
+		"sqlserver_check_integrity",
 		"sqlserver_describe_table",
 		"sqlserver_list_tables",
 		"sqlserver_validate_table",
@@ -164,7 +166,15 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 		len(fake.validationQuery.Predicates) != 0 || fake.validationQuery.Limit != 2 {
 		t.Fatalf("validation request = %#v, want target-scoped bounded request", fake.validationQuery)
 	}
-	for _, result := range []*mcp.CallToolResult{listResult, descriptionResult, validationResult} {
+
+	integrityResult := callTool(t, client, "sqlserver_check_integrity", map[string]any{})
+	var integrity checkIntegrityOutput
+	decodeStructuredResult(t, integrityResult, &integrity)
+	if integrity != (checkIntegrityOutput{Completed: true}) || fake.integrityCalls != 1 {
+		t.Fatalf("integrity output = %#v, fake calls = %d", integrity, fake.integrityCalls)
+	}
+
+	for _, result := range []*mcp.CallToolResult{listResult, descriptionResult, validationResult, integrityResult} {
 		encoded, err := json.Marshal(result.StructuredContent)
 		if err != nil {
 			t.Fatal(err)
@@ -207,6 +217,11 @@ func TestMCPRejectsUnknownAndInvalidInputsBeforeServiceCall(t *testing.T) {
 			tool: "sqlserver_validate_table",
 			args: map[string]any{"schema": "dbo", "table": "orders", "limit": "100"},
 		},
+		{
+			name: "caller cannot select another integrity-check database",
+			tool: "sqlserver_check_integrity",
+			args: map[string]any{"database": "master"},
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := client.CallTool(context.Background(), &mcp.CallToolParams{
@@ -238,6 +253,12 @@ func TestMCPToolErrorsAreSafeAndRowValuesAreNeverReturned(t *testing.T) {
 	}
 	if strings.Contains(string(result.Content[0].(*mcp.TextContent).Text), "do-not-return") {
 		t.Fatalf("tool error leaked underlying error: %#v", result.Content)
+	}
+
+	integrityResult := callTool(t, client, "sqlserver_check_integrity", map[string]any{})
+	if !integrityResult.IsError ||
+		strings.Contains(string(integrityResult.Content[0].(*mcp.TextContent).Text), "do-not-return") {
+		t.Fatalf("integrity tool error was not safe: %#v", integrityResult.Content)
 	}
 }
 
@@ -294,6 +315,8 @@ type fakeInspectionService struct {
 	validation      sqlserver.ValidationResult
 	validationQuery sqlserver.ValidationQuery
 	validationError error
+	integrity       sqlserver.IntegrityResult
+	integrityCalls  int
 }
 
 func (fake *fakeInspectionService) ListTables(_ context.Context, database, schema string) (sqlserver.TableList, error) {
@@ -321,4 +344,15 @@ func (fake *fakeInspectionService) Validate(_ context.Context, query sqlserver.V
 		return sqlserver.ValidationResult{}, fake.validationError
 	}
 	return fake.validation, nil
+}
+
+func (fake *fakeInspectionService) CheckIntegrity(_ context.Context) (sqlserver.IntegrityResult, error) {
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	fake.calls++
+	fake.integrityCalls++
+	if fake.validationError != nil {
+		return sqlserver.IntegrityResult{}, fake.validationError
+	}
+	return fake.integrity, nil
 }

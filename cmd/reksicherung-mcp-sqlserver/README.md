@@ -17,13 +17,19 @@ The server registers only these tools:
 - `sqlserver_validate_table`: count total rows in a table, capped at 100.
   Caller-supplied predicates are not accepted; this prevents repeated
   value-based count queries from becoming a row-value inference oracle.
+- `sqlserver_check_integrity`: run full `DBCC CHECKDB` on the configured
+  database with fixed non-repair options and a 15-minute timeout. It returns
+  command-completion status only, not DBCC diagnostic messages or a clean
+  integrity verdict.
 
 Tool inputs reject unknown JSON properties and the service validates
 identifiers and bounds. The database is not a tool
 argument: every call is scoped to `REKSICHERUNG_SQLSERVER_DATABASE`. No tool
 accepts SQL text or returns row-level values. Validation returns only an
 aggregate count and truncation flag. A 10-second service timeout and fixed
-metadata/table/count limits are applied by the executable.
+metadata/table/count limits are applied by the executable. The DBCC tool uses a
+separate fixed 15-minute timeout and `MAXDOP = 2`; callers cannot select a
+database or DBCC option.
 Each incoming stdio protocol frame is limited to 64 KiB before JSON decoding.
 
 Database errors and configuration errors are reduced to safe generic text.
@@ -106,9 +112,8 @@ aggregates, not record values.
 
 ## SQL Server permissions
 
-Use a dedicated login/user for the restored target. Grant it only `CONNECT` and
-`SELECT` on the schema(s) being checked. For example, after provisioning the
-login out of band:
+The metadata and aggregate tools need only `CONNECT` and `SELECT` on the
+schema(s) being checked. For example, after provisioning the login out of band:
 
 ```sql
 USE [RestoredDb];
@@ -117,9 +122,16 @@ GRANT CONNECT TO [reksicherung_inspector];
 GRANT SELECT ON SCHEMA::[dbo] TO [reksicherung_inspector];
 ```
 
-Do not grant `db_owner`, `db_datawriter`, broad server roles, `EXECUTE`,
-`IMPERSONATE`, DDL, write permissions, or cross-database access. Grant
-additional schema-level `SELECT` only when those schemas are intentionally in
-the review scope. SQL Server metadata visibility follows the permissions of
+`DBCC CHECKDB` additionally requires `sysadmin` or the target database's
+`db_owner` fixed role. Never grant `sysadmin`. If you enable
+`sqlserver_check_integrity`, use an identity that is `db_owner` only in the
+isolated, disposable restored database. `db_owner` can modify that database;
+the MCP service itself still exposes no arbitrary SQL or repair operation.
+Do not reuse this elevated identity for production or any unrelated database.
+If that permission is unacceptable, use only the metadata and aggregate tools
+with the restricted `CONNECT`/`SELECT` identity and do not enable CHECKDB.
+
+Grant additional schema-level `SELECT` only when those schemas are intentionally
+in the review scope. SQL Server metadata visibility follows the permissions of
 the user, so table/schema metadata is limited accordingly. `ApplicationIntent`
 or a read-only transaction is not a replacement for SQL Server permissions.

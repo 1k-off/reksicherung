@@ -16,6 +16,7 @@ type inspectionService interface {
 	ListTables(context.Context, string, string) (sqlserver.TableList, error)
 	DescribeTable(context.Context, sqlserver.TableRef) (sqlserver.TableDescription, error)
 	Validate(context.Context, sqlserver.ValidationQuery) (sqlserver.ValidationResult, error)
+	CheckIntegrity(context.Context) (sqlserver.IntegrityResult, error)
 }
 
 type listTablesArgs struct {
@@ -99,12 +100,16 @@ type validateTableOutput struct {
 	Truncated    bool `json:"truncated" jsonschema:"True when the matching row count reached the cap."`
 }
 
+type checkIntegrityOutput struct {
+	Completed bool `json:"completed" jsonschema:"True when SQL Server completed DBCC CHECKDB without a command error."`
+}
+
 func newMCPServer(service inspectionService, database string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reksicherung-sqlserver",
 		Version: "0.1.0",
 	}, &mcp.ServerOptions{
-		Instructions: "Read-only SQL Server restore inspection. Results contain schema metadata or bounded aggregates, never row values. Only the configured target database is available.",
+		Instructions: "Read-only SQL Server restore inspection. Results contain schema metadata, bounded aggregates, or DBCC CHECKDB execution status, never row values. Only the configured target database is available.",
 		// SDK diagnostics are disabled so protocol internals cannot accidentally
 		// place prompts or tool arguments in logs.
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -181,6 +186,18 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 		}, nil
 	})
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "sqlserver_check_integrity",
+		Description: "Run a full, target-scoped DBCC CHECKDB with fixed non-repair options and a bounded timeout. Returns whether the command completed; SQL Server diagnostic messages are not returned.",
+		Annotations: readOnlyToolAnnotations(),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, checkIntegrityOutput, error) {
+		result, err := service.CheckIntegrity(ctx)
+		if err != nil {
+			return nil, checkIntegrityOutput{}, safeToolError(err)
+		}
+		return nil, checkIntegrityOutput{Completed: result.Completed}, nil
+	})
+
 	return server
 }
 
@@ -205,6 +222,12 @@ func safeToolError(err error) error {
 		return errors.New("SQL Server inspection timed out")
 	case errors.Is(err, sqlserver.ErrCanceled):
 		return errors.New("SQL Server inspection canceled")
+	case errors.Is(err, sqlserver.ErrIntegrityCheckTimeout):
+		return errors.New("SQL Server integrity check timed out")
+	case errors.Is(err, sqlserver.ErrIntegrityCheckCanceled):
+		return errors.New("SQL Server integrity check canceled")
+	case errors.Is(err, sqlserver.ErrIntegrityCheckFailed):
+		return errors.New("SQL Server integrity check failed")
 	default:
 		return errors.New("SQL Server inspection failed")
 	}

@@ -89,6 +89,10 @@ func TestSQLServerLoopbackFixture(t *testing.T) {
 	if _, err := service.ListTables(ctx, "another_database", "dbo"); err == nil {
 		t.Fatal("SQL Server service accepted a database outside its configured target")
 	}
+	integrity, err := service.CheckIntegrity(ctx)
+	if err != nil || !integrity.Completed {
+		t.Fatal("SQL Server service did not complete DBCC CHECKDB on the disposable fixture")
+	}
 }
 
 func isLoopbackHost(host string) bool {

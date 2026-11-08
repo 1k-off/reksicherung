@@ -2,10 +2,12 @@ package sqlserver
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestQuoteIdentifier(t *testing.T) {
@@ -120,6 +122,12 @@ func TestBuildValidationSQLRejectsUnsupportedInput(t *testing.T) {
 	}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("newService() with excessive cap error = %v, want ErrInvalidInput", err)
 	}
+	if _, err := newService(&fakeQueryer{}, Options{
+		TargetDatabase:   "restore",
+		IntegrityTimeout: hardIntegrityTimeout + time.Millisecond,
+	}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("newService() with excessive integrity timeout error = %v, want ErrInvalidInput", err)
+	}
 }
 
 func TestServiceBoundsMetadataAndReturnsAggregateOnly(t *testing.T) {
@@ -221,6 +229,75 @@ func TestServiceCannotEscapeConfiguredDatabase(t *testing.T) {
 	}
 }
 
+func TestCheckIntegrityUsesFixedTargetScopedDBCC(t *testing.T) {
+	fake := &fakeQueryer{}
+	service, err := newService(fake, Options{TargetDatabase: "restore]db"})
+	if err != nil {
+		t.Fatalf("newService() error = %v", err)
+	}
+
+	result, err := service.CheckIntegrity(context.Background())
+	if err != nil {
+		t.Fatalf("CheckIntegrity() error = %v", err)
+	}
+	if result != (IntegrityResult{Completed: true}) {
+		t.Fatalf("CheckIntegrity() = %#v, want completed result", result)
+	}
+	if len(fake.execCalls) != 1 {
+		t.Fatalf("ExecContext() calls = %d, want 1", len(fake.execCalls))
+	}
+	want := "DBCC CHECKDB ([restore]]db]) WITH NO_INFOMSGS, MAXDOP = 2"
+	if fake.execCalls[0] != want {
+		t.Fatalf("DBCC statement = %q, want %q", fake.execCalls[0], want)
+	}
+	if strings.Contains(strings.ToUpper(fake.execCalls[0]), "REPAIR") {
+		t.Fatalf("DBCC statement contains a repair option: %q", fake.execCalls[0])
+	}
+}
+
+func TestCheckIntegrityRejectsNilContextBeforeExecution(t *testing.T) {
+	fake := &fakeQueryer{}
+	service, err := newService(fake, Options{TargetDatabase: "restore"})
+	if err != nil {
+		t.Fatalf("newService() error = %v", err)
+	}
+	if _, err := service.CheckIntegrity(nil); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("CheckIntegrity(nil) error = %v, want ErrInvalidInput", err)
+	}
+	if len(fake.execCalls) != 0 {
+		t.Fatal("invalid target reached the database")
+	}
+}
+
+func TestCheckIntegrityClassifiesTimeoutAndSanitizesErrors(t *testing.T) {
+	t.Run("timeout", func(t *testing.T) {
+		fake := &blockingExecQueryer{}
+		service, err := newService(fake, Options{
+			TargetDatabase:   "restore",
+			IntegrityTimeout: time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("newService() error = %v", err)
+		}
+		_, err = service.CheckIntegrity(context.Background())
+		if !errors.Is(err, ErrIntegrityCheckTimeout) {
+			t.Fatalf("CheckIntegrity() error = %v, want ErrIntegrityCheckTimeout", err)
+		}
+	})
+
+	t.Run("database error", func(t *testing.T) {
+		fake := &fakeQueryer{execErr: errors.New("password=do-not-return")}
+		service, err := newService(fake, Options{TargetDatabase: "restore"})
+		if err != nil {
+			t.Fatalf("newService() error = %v", err)
+		}
+		_, err = service.CheckIntegrity(context.Background())
+		if !errors.Is(err, ErrIntegrityCheckFailed) || strings.Contains(err.Error(), "do-not-return") {
+			t.Fatalf("CheckIntegrity() error = %v, want generic sanitized integrity error", err)
+		}
+	})
+}
+
 func TestDatabaseErrorsAreRedactedAndDeadlinesClassified(t *testing.T) {
 	fake := &fakeQueryer{queryErr: errors.New("login failed: password=not-for-output")}
 	service, err := newService(fake, Options{TargetDatabase: "restore"})
@@ -261,6 +338,8 @@ type fakeQueryer struct {
 	calls     []queryCall
 	aggregate int64
 	queryErr  error
+	execCalls []string
+	execErr   error
 }
 
 func (fake *fakeQueryer) QueryContext(ctx context.Context, query string, args ...any) (rows, error) {
@@ -288,6 +367,25 @@ func (fake *fakeQueryer) QueryContext(ctx context.Context, query string, args ..
 	default:
 		return nil, errors.New("unexpected test query")
 	}
+}
+
+func (fake *fakeQueryer) ExecContext(ctx context.Context, query string, _ ...any) (sql.Result, error) {
+	fake.execCalls = append(fake.execCalls, query)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, fake.execErr
+}
+
+type blockingExecQueryer struct{}
+
+func (*blockingExecQueryer) QueryContext(context.Context, string, ...any) (rows, error) {
+	return nil, errors.New("unexpected query")
+}
+
+func (*blockingExecQueryer) ExecContext(ctx context.Context, _ string, _ ...any) (sql.Result, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 type fakeRows struct {

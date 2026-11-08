@@ -64,12 +64,13 @@ func run(ctx context.Context, getenv func(string) string, stdin, stdout *os.File
 	}
 
 	service, err := sqlserver.New(db, sqlserver.Options{
-		TargetDatabase: config.database,
-		QueryTimeout:   10 * time.Second,
-		MaxSampleRows:  100,
-		MaxTables:      200,
-		MaxColumns:     200,
-		MaxPredicates:  8,
+		TargetDatabase:   config.database,
+		QueryTimeout:     10 * time.Second,
+		IntegrityTimeout: 15 * time.Minute,
+		MaxSampleRows:    100,
+		MaxTables:        200,
+		MaxColumns:       200,
+		MaxPredicates:    8,
 	})
 	if err != nil {
 		return errors.New("could not initialize SQL Server inspection")

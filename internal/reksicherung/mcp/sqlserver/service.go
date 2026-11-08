@@ -15,36 +15,43 @@ import (
 )
 
 var (
-	ErrInvalidInput = errors.New("invalid SQL Server inspection input")
-	ErrNotFound     = errors.New("SQL Server object not found")
-	ErrQueryFailed  = errors.New("SQL Server inspection failed")
-	ErrTimeout      = errors.New("SQL Server inspection timed out")
-	ErrCanceled     = errors.New("SQL Server inspection canceled")
+	ErrInvalidInput           = errors.New("invalid SQL Server inspection input")
+	ErrNotFound               = errors.New("SQL Server object not found")
+	ErrQueryFailed            = errors.New("SQL Server inspection failed")
+	ErrTimeout                = errors.New("SQL Server inspection timed out")
+	ErrCanceled               = errors.New("SQL Server inspection canceled")
+	ErrIntegrityCheckFailed   = errors.New("SQL Server integrity check failed")
+	ErrIntegrityCheckTimeout  = errors.New("SQL Server integrity check timed out")
+	ErrIntegrityCheckCanceled = errors.New("SQL Server integrity check canceled")
 )
 
 const (
-	defaultQueryTimeout = 10 * time.Second
-	defaultSampleLimit  = 100
-	defaultMetadataCap  = 500
-	defaultPredicateCap = 8
+	defaultQueryTimeout     = 10 * time.Second
+	defaultIntegrityTimeout = 5 * time.Minute
+	defaultSampleLimit      = 100
+	defaultMetadataCap      = 500
+	defaultPredicateCap     = 8
 
-	hardQueryTimeout = 2 * time.Minute
-	hardSampleLimit  = 1000
-	hardMetadataCap  = 5000
-	hardPredicateCap = 16
-	maxStringValue   = 4096
+	hardQueryTimeout     = 2 * time.Minute
+	hardIntegrityTimeout = 30 * time.Minute
+	hardSampleLimit      = 1000
+	hardMetadataCap      = 5000
+	hardPredicateCap     = 16
+	maxStringValue       = 4096
+	integrityCheckMaxDOP = 2
 )
 
 // Options cap the work each service operation can request. Zero-valued fields
 // use conservative defaults; values above the hard limits are rejected.
 type Options struct {
 	// TargetDatabase scopes every operation to one configured restore database.
-	TargetDatabase string
-	QueryTimeout   time.Duration
-	MaxSampleRows  int
-	MaxTables      int
-	MaxColumns     int
-	MaxPredicates  int
+	TargetDatabase   string
+	QueryTimeout     time.Duration
+	IntegrityTimeout time.Duration
+	MaxSampleRows    int
+	MaxTables        int
+	MaxColumns       int
+	MaxPredicates    int
 }
 
 // TableRef identifies a table using SQL Server database, schema, and table
@@ -127,6 +134,12 @@ type ValidationResult struct {
 	Truncated    bool
 }
 
+// IntegrityResult reports only whether the bounded DBCC CHECKDB command
+// completed. It does not reproduce SQL Server's diagnostic messages.
+type IntegrityResult struct {
+	Completed bool
+}
+
 type rows interface {
 	Next() bool
 	Scan(...any) error
@@ -136,6 +149,7 @@ type rows interface {
 
 type queryer interface {
 	QueryContext(context.Context, string, ...any) (rows, error)
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
 type sqlDB struct {
@@ -146,7 +160,12 @@ func (db sqlDB) QueryContext(ctx context.Context, query string, args ...any) (ro
 	return db.db.QueryContext(ctx, query, args...)
 }
 
-// Service exposes only metadata inspection and bounded aggregate validation.
+func (db sqlDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return db.db.ExecContext(ctx, query, args...)
+}
+
+// Service exposes metadata inspection, bounded aggregate validation, and a
+// target-scoped DBCC CHECKDB operation.
 type Service struct {
 	db      queryer
 	options Options
@@ -188,6 +207,9 @@ func normalizeOptions(options Options) (Options, error) {
 	if options.QueryTimeout == 0 {
 		options.QueryTimeout = defaultQueryTimeout
 	}
+	if options.IntegrityTimeout == 0 {
+		options.IntegrityTimeout = defaultIntegrityTimeout
+	}
 	if options.MaxSampleRows == 0 {
 		options.MaxSampleRows = defaultSampleLimit
 	}
@@ -201,6 +223,7 @@ func normalizeOptions(options Options) (Options, error) {
 		options.MaxPredicates = defaultPredicateCap
 	}
 	if options.QueryTimeout < time.Millisecond || options.QueryTimeout > hardQueryTimeout ||
+		options.IntegrityTimeout < time.Millisecond || options.IntegrityTimeout > hardIntegrityTimeout ||
 		options.MaxSampleRows < 1 || options.MaxSampleRows > hardSampleLimit ||
 		options.MaxTables < 1 || options.MaxTables > hardMetadataCap ||
 		options.MaxColumns < 1 || options.MaxColumns > hardMetadataCap ||
@@ -344,6 +367,31 @@ func (s *Service) Validate(ctx context.Context, request ValidationQuery) (Valida
 		return ValidationResult{ObservedRows: request.Limit, Limit: request.Limit, Truncated: true}, nil
 	}
 	return ValidationResult{ObservedRows: int(observed), Limit: request.Limit}, nil
+}
+
+// CheckIntegrity runs a full DBCC CHECKDB against only the configured target
+// database. The SQL statement and options are fixed; the database name is
+// quoted as an identifier. The operation never uses a repair option.
+func (s *Service) CheckIntegrity(ctx context.Context) (IntegrityResult, error) {
+	if ctx == nil {
+		return IntegrityResult{}, ErrInvalidInput
+	}
+	database, err := quoteIdentifier(s.options.TargetDatabase)
+	if err != nil {
+		return IntegrityResult{}, ErrInvalidInput
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, s.options.IntegrityTimeout)
+	defer cancel()
+	statement := fmt.Sprintf(
+		"DBCC CHECKDB (%s) WITH NO_INFOMSGS, MAXDOP = %d",
+		database,
+		integrityCheckMaxDOP,
+	)
+	if _, err := s.db.ExecContext(ctx, statement); err != nil {
+		return IntegrityResult{}, classifyIntegrityError(ctx, err)
+	}
+	return IntegrityResult{Completed: true}, nil
 }
 
 func (s *Service) describeTable(ctx context.Context, ref TableRef) (TableDescription, error) {
@@ -532,4 +580,14 @@ func classifyError(ctx context.Context, err error) error {
 		return ErrCanceled
 	}
 	return ErrQueryFailed
+}
+
+func classifyIntegrityError(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return ErrIntegrityCheckTimeout
+	}
+	if errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, context.Canceled) {
+		return ErrIntegrityCheckCanceled
+	}
+	return ErrIntegrityCheckFailed
 }
