@@ -88,6 +88,8 @@ func TestCLIRejectsMissingConfigAndUnexpectedArguments(t *testing.T) {
 	for _, args := range [][]string{
 		{"validate"},
 		{"catalog", "-config", "somewhere.yaml", "extra"},
+		{"reconcile"},
+		{"reconcile", "-registry", "runs.db", "-interval", "500ms"},
 	} {
 		var stdout, stderr bytes.Buffer
 		if err := run(context.Background(), args, &stdout, &stderr); err == nil {

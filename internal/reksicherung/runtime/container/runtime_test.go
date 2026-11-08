@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"testing"
+	"time"
 )
 
 func TestValidateSpecAcceptsValidRestoreContainer(t *testing.T) {
@@ -14,6 +15,8 @@ func TestValidateSpecAcceptsValidRestoreContainer(t *testing.T) {
 		Image:       "mcr.microsoft.com/mssql/server:2022-latest",
 		CPUs:        2,
 		MemoryBytes: 2 * 1024 * 1024 * 1024,
+		DiskBytes:   4 * 1024 * 1024 * 1024,
+		Timeout:     time.Hour,
 		Environment: []EnvironmentVariable{
 			{Name: "ACCEPT_EULA", Value: "Y"},
 			{Name: "MSSQL_SA_PASSWORD", Value: "dummy-test-password"},
@@ -32,6 +35,8 @@ func TestValidateSpecRejectsInvalidInputs(t *testing.T) {
 		Image:       "mcr.microsoft.com/mssql/server:2022-latest",
 		CPUs:        2,
 		MemoryBytes: 2 * 1024 * 1024 * 1024,
+		DiskBytes:   4 * 1024 * 1024 * 1024,
+		Timeout:     time.Hour,
 	}
 	tests := []struct {
 		name string
@@ -54,8 +59,32 @@ func TestValidateSpecRejectsInvalidInputs(t *testing.T) {
 			edit: func(spec *Spec) { spec.CPUs = math.Inf(1) },
 		},
 		{
+			name: "excessive CPU",
+			edit: func(spec *Spec) { spec.CPUs = MaxContainerCPUs + 1 },
+		},
+		{
 			name: "insufficient memory",
 			edit: func(spec *Spec) { spec.MemoryBytes = 1 },
+		},
+		{
+			name: "excessive memory",
+			edit: func(spec *Spec) { spec.MemoryBytes = MaxContainerMemory + 1 },
+		},
+		{
+			name: "insufficient disk",
+			edit: func(spec *Spec) { spec.DiskBytes = MinContainerDiskBytes - 1 },
+		},
+		{
+			name: "excessive disk",
+			edit: func(spec *Spec) { spec.DiskBytes = MaxContainerDiskBytes + 1 },
+		},
+		{
+			name: "missing timeout",
+			edit: func(spec *Spec) { spec.Timeout = 0 },
+		},
+		{
+			name: "excessive timeout",
+			edit: func(spec *Spec) { spec.Timeout = 24*time.Hour + time.Second },
 		},
 		{
 			name: "invalid environment key",

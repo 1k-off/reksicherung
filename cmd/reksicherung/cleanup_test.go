@@ -8,14 +8,15 @@ import (
 	"time"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/runregistry"
+	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
 type fakeCleanupRuntime struct {
 	removedID string
 }
 
-func (runtime *fakeCleanupRuntime) Remove(_ context.Context, id string) error {
-	runtime.removedID = id
+func (runtime *fakeCleanupRuntime) Remove(_ context.Context, target container.Container) error {
+	runtime.removedID = target.ID
 	return nil
 }
 

@@ -7,9 +7,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strings"
 	"time"
+)
+
+const (
+	MinContainerDiskBytes   int64   = 1 << 30
+	MaxContainerDiskBytes   int64   = 1 << 40
+	MaxContainerMemory      int64   = 1 << 40
+	MaxContainerCPUs        float64 = 64
+	MaxEnvironmentBytes             = 64 << 10
+	MaxEnvironmentVariables         = 64
+	MaxCommandBytes                 = 64 << 10
+	MaxCommandArguments             = 256
 )
 
 var (
@@ -26,28 +38,36 @@ type EnvironmentVariable struct {
 	Value string
 }
 
-// Spec describes a short-lived, isolated restore container.
+// Spec describes a short-lived, isolated restore container. All resource
+// limits, including the maximum lifetime, are required and validated.
 type Spec struct {
-	RunID       string
-	Image       string
-	CPUs        float64
-	MemoryBytes int64
-	Environment []EnvironmentVariable
+	RunID           string
+	Image           string
+	CPUs            float64
+	MemoryBytes     int64
+	DiskBytes       int64
+	Timeout         time.Duration
+	RetainForReview bool
+	Environment     []EnvironmentVariable
 }
 
 // Container identifies a runtime-managed container without exposing its
 // environment or other configuration.
 type Container struct {
-	ID   string
-	Name string
+	ID    string
+	Name  string
+	RunID string
 }
 
-// Runtime starts and removes restore containers. Implementations should make
-// Remove idempotent so interrupted workflow cleanup can be retried safely.
+// Runtime starts and removes restore containers and streams bounded artifacts
+// into them. Implementations should make Remove idempotent so interrupted
+// workflow cleanup can be retried safely.
 type Runtime interface {
 	Start(context.Context, Spec) (Container, error)
-	Remove(context.Context, string) error
-	Exec(context.Context, string, []string) ([]byte, error)
+	Remove(context.Context, Container) error
+	Exec(context.Context, Container, []string) ([]byte, error)
+	ExecWithEnvironment(context.Context, Container, []string, []EnvironmentVariable) ([]byte, error)
+	Transfer(ctx context.Context, target Container, name string, source io.ReadCloser, maxBytes int64) error
 }
 
 // ValidateSpec checks fields that are shared by container implementations.
@@ -58,24 +78,47 @@ func ValidateSpec(spec Spec) error {
 	if spec.Image == "" || strings.HasPrefix(spec.Image, "-") || strings.TrimSpace(spec.Image) != spec.Image || strings.ContainsAny(spec.Image, "\x00\r\n\t ") {
 		return fmt.Errorf("%w: image reference is empty or contains whitespace", ErrInvalidSpec)
 	}
-	if math.IsNaN(spec.CPUs) || math.IsInf(spec.CPUs, 0) || spec.CPUs <= 0 {
-		return fmt.Errorf("%w: CPU limit must be a finite positive number", ErrInvalidSpec)
+	if math.IsNaN(spec.CPUs) || math.IsInf(spec.CPUs, 0) || spec.CPUs < 0.25 || spec.CPUs > MaxContainerCPUs {
+		return fmt.Errorf("%w: CPU limit must be between 0.25 and %g", ErrInvalidSpec, MaxContainerCPUs)
 	}
-	if spec.MemoryBytes < 64*1024*1024 {
-		return fmt.Errorf("%w: memory limit must be at least 64 MiB", ErrInvalidSpec)
+	if spec.MemoryBytes < 64*1024*1024 || spec.MemoryBytes > MaxContainerMemory {
+		return fmt.Errorf("%w: memory limit must be between 64 MiB and 1 TiB", ErrInvalidSpec)
 	}
-	seen := make(map[string]struct{}, len(spec.Environment))
-	for _, variable := range spec.Environment {
+	if spec.DiskBytes < MinContainerDiskBytes || spec.DiskBytes > MaxContainerDiskBytes {
+		return fmt.Errorf("%w: writable-layer disk limit must be between 1 GiB and 1 TiB", ErrInvalidSpec)
+	}
+	if spec.Timeout < time.Minute || spec.Timeout > 24*time.Hour {
+		return fmt.Errorf("%w: container lifetime must be between 1 minute and 24 hours", ErrInvalidSpec)
+	}
+	if err := ValidateEnvironment(spec.Environment); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidSpec, err)
+	}
+	return nil
+}
+
+// ValidateEnvironment checks that environment variables can be represented
+// safely in a bounded Podman environment file.
+func ValidateEnvironment(environment []EnvironmentVariable) error {
+	if len(environment) > MaxEnvironmentVariables {
+		return fmt.Errorf("environment has more than %d variables", MaxEnvironmentVariables)
+	}
+	seen := make(map[string]struct{}, len(environment))
+	totalBytes := 0
+	for _, variable := range environment {
 		if !validEnvironmentName(variable.Name) {
-			return fmt.Errorf("%w: invalid environment variable name %q", ErrInvalidSpec, variable.Name)
+			return fmt.Errorf("invalid environment variable name %q", variable.Name)
 		}
 		if strings.ContainsAny(variable.Value, "\x00\r\n") {
-			return fmt.Errorf("%w: environment variable %q contains a forbidden character", ErrInvalidSpec, variable.Name)
+			return fmt.Errorf("environment variable %q contains a forbidden character", variable.Name)
 		}
 		if _, exists := seen[variable.Name]; exists {
-			return fmt.Errorf("%w: duplicate environment variable %q", ErrInvalidSpec, variable.Name)
+			return fmt.Errorf("duplicate environment variable %q", variable.Name)
 		}
 		seen[variable.Name] = struct{}{}
+		totalBytes += len(variable.Name) + len(variable.Value) + 2
+		if totalBytes > MaxEnvironmentBytes {
+			return fmt.Errorf("environment exceeds %d bytes", MaxEnvironmentBytes)
+		}
 	}
 	return nil
 }

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
 func TestReconcileRemovesExpiredContainerAndClosesInterruptedRun(t *testing.T) {
@@ -26,6 +28,11 @@ func TestReconcileRemovesExpiredContainerAndClosesInterruptedRun(t *testing.T) {
 	}
 	if len(remover.ids) != 1 || remover.ids[0] != record.ContainerID {
 		t.Fatalf("removed IDs = %#v, want %q", remover.ids, record.ContainerID)
+	}
+	if len(remover.targets) != 1 ||
+		remover.targets[0].Name != container.ContainerName(record.ID) ||
+		remover.targets[0].RunID != record.ID {
+		t.Fatalf("removed handle = %#v, want run-scoped name and ID", remover.targets)
 	}
 	got, err := store.Get(context.Background(), record.ID)
 	if err != nil {
@@ -172,13 +179,15 @@ func createExpiringRun(t *testing.T, store *Store, id string, mode CleanupMode, 
 type fakeRemover struct {
 	mu       sync.Mutex
 	ids      []string
+	targets  []container.Container
 	failures []error
 }
 
-func (remover *fakeRemover) Remove(_ context.Context, id string) error {
+func (remover *fakeRemover) Remove(_ context.Context, target container.Container) error {
 	remover.mu.Lock()
 	defer remover.mu.Unlock()
-	remover.ids = append(remover.ids, id)
+	remover.ids = append(remover.ids, target.ID)
+	remover.targets = append(remover.targets, target)
 	if len(remover.failures) == 0 {
 		return nil
 	}
@@ -194,7 +203,7 @@ type blockingRemover struct {
 	count   int
 }
 
-func (remover *blockingRemover) Remove(ctx context.Context, _ string) error {
+func (remover *blockingRemover) Remove(ctx context.Context, _ container.Container) error {
 	remover.mu.Lock()
 	remover.count++
 	remover.mu.Unlock()

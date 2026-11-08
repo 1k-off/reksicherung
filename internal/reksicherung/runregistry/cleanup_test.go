@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
 type fakeContainerRemover struct {
@@ -13,8 +15,8 @@ type fakeContainerRemover struct {
 	err       error
 }
 
-func (remover *fakeContainerRemover) Remove(_ context.Context, id string) error {
-	remover.removedID = id
+func (remover *fakeContainerRemover) Remove(_ context.Context, target container.Container) error {
+	remover.removedID = target.ID
 	return remover.err
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/runregistry"
+	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container/podman"
 )
 
@@ -22,7 +23,7 @@ type runregistryStore interface {
 }
 
 type cleanupRuntime interface {
-	Remove(context.Context, string) error
+	Remove(context.Context, container.Container) error
 }
 
 func runCleanup(ctx context.Context, args []string, stdout, stderr io.Writer) error {

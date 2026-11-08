@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 // Remover removes a container by stable runtime ID. It must treat an already
 // absent container as successfully removed.
 type Remover interface {
-	Remove(context.Context, string) error
+	Remove(context.Context, container.Container) error
 }
 
 // Reconciler retries cleanup for expired run leases. The registry claim is
@@ -83,7 +85,9 @@ func (reconciler Reconciler) Reconcile(ctx context.Context, now time.Time) ([]Cl
 		}
 
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-		removeErr := reconciler.Containers.Remove(cleanupCtx, claimed.ContainerID)
+		removeErr := reconciler.Containers.Remove(cleanupCtx, container.Container{
+			ID: claimed.ContainerID, Name: container.ContainerName(claimed.ID), RunID: claimed.ID,
+		})
 		cancel()
 		outcome := CleanupOutcome{RunID: candidate.ID}
 		if removeErr != nil {

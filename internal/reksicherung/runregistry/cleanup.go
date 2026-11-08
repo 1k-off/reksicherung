@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
 var (
@@ -18,7 +20,7 @@ type heldRunStore interface {
 }
 
 type containerRemover interface {
-	Remove(context.Context, string) error
+	Remove(context.Context, container.Container) error
 }
 
 // CleanupHeld removes a container retained for human review. It records the
@@ -59,7 +61,9 @@ func CleanupHeld(ctx context.Context, store heldRunStore, containers containerRe
 		return Record{}, err
 	}
 
-	removeErr := containers.Remove(ctx, record.ContainerID)
+	removeErr := containers.Remove(ctx, container.Container{
+		ID: record.ContainerID, Name: container.ContainerName(record.ID), RunID: record.ID,
+	})
 	updateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if removeErr != nil {
