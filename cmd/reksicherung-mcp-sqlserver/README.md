@@ -14,15 +14,16 @@ The server registers only these tools:
   schema.
 - `sqlserver_describe_table`: return at most 200 column definitions for a
   selected table.
-- `sqlserver_validate_table`: count matching rows up to 100, using at most 8
-  AND-combined predicates from the service's fixed operator allowlist.
+- `sqlserver_validate_table`: count total rows in a table, capped at 100.
+  Caller-supplied predicates are not accepted; this prevents repeated
+  value-based count queries from becoming a row-value inference oracle.
 
 Tool inputs reject unknown JSON properties and the service validates
-identifiers, operators, values, and bounds. The database is not a tool
+identifiers and bounds. The database is not a tool
 argument: every call is scoped to `REKSICHERUNG_SQLSERVER_DATABASE`. No tool
 accepts SQL text or returns row-level values. Validation returns only an
 aggregate count and truncation flag. A 10-second service timeout and fixed
-metadata/sample/predicate limits are applied by the executable.
+metadata/table/count limits are applied by the executable.
 Each incoming stdio protocol frame is limited to 64 KiB before JSON decoding.
 
 Database errors and configuration errors are reduced to safe generic text.
@@ -32,7 +33,7 @@ Do not add logs that print environment values, tool inputs, SQL parameters, or
 database results.
 
 The service limits returned results, but cannot guarantee a limit on SQL Server
-CPU or I/O for a selective predicate. Use a disposable restored target with
+CPU or I/O for a large table scan. Use a disposable restored target with
 appropriate SQL Server resource controls.
 
 ## Build and configure
@@ -99,7 +100,7 @@ prompts:
       - reksicherung_sqlserver__sqlserver_validate_table
 ```
 
-Set `runtime.log_inputs: false` because predicate values are tool inputs and may
+Set `runtime.log_inputs: false` because database and table names are tool inputs and may
 otherwise be persisted by Airon. Tool results contain only metadata and
 aggregates, not record values.
 

@@ -154,9 +154,6 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 		"schema": "dbo",
 		"table":  "orders",
 		"limit":  2,
-		"predicates": []any{
-			map[string]any{"column": "status", "operator": "eq", "value": "ready"},
-		},
 	})
 	var validated validateTableOutput
 	decodeStructuredResult(t, validationResult, &validated)
@@ -164,8 +161,7 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 		t.Fatalf("validation output = %#v", validated)
 	}
 	if fake.validationQuery.Table.Database != "RestoredDb" ||
-		!reflect.DeepEqual(fake.validationQuery.Predicates, []sqlserver.Predicate{{Column: "status", Operator: sqlserver.Equal, Value: "ready"}}) ||
-		fake.validationQuery.Limit != 2 {
+		len(fake.validationQuery.Predicates) != 0 || fake.validationQuery.Limit != 2 {
 		t.Fatalf("validation request = %#v, want target-scoped bounded request", fake.validationQuery)
 	}
 	for _, result := range []*mcp.CallToolResult{listResult, descriptionResult, validationResult} {
@@ -197,12 +193,12 @@ func TestMCPRejectsUnknownAndInvalidInputsBeforeServiceCall(t *testing.T) {
 			args: map[string]any{"schema": "dbo", "database": "master"},
 		},
 		{
-			name: "unknown nested predicate property",
+			name: "caller-selected predicates rejected",
 			tool: "sqlserver_validate_table",
 			args: map[string]any{
 				"schema": "dbo", "table": "orders", "limit": 1,
 				"predicates": []any{map[string]any{
-					"column": "id", "operator": "eq", "value": 1, "sql": "DELETE FROM orders",
+					"column": "email", "operator": "like", "value": "customer@example.invalid%",
 				}},
 			},
 		},
@@ -210,30 +206,6 @@ func TestMCPRejectsUnknownAndInvalidInputsBeforeServiceCall(t *testing.T) {
 			name: "invalid limit type",
 			tool: "sqlserver_validate_table",
 			args: map[string]any{"schema": "dbo", "table": "orders", "limit": "100"},
-		},
-		{
-			name: "non-scalar predicate value",
-			tool: "sqlserver_validate_table",
-			args: map[string]any{
-				"schema": "dbo", "table": "orders", "limit": 1,
-				"predicates": []any{map[string]any{"column": "id", "operator": "eq", "value": map[string]any{"x": 1}}},
-			},
-		},
-		{
-			name: "null-check with a value",
-			tool: "sqlserver_validate_table",
-			args: map[string]any{
-				"schema": "dbo", "table": "orders", "limit": 1,
-				"predicates": []any{map[string]any{"column": "id", "operator": "is_null", "value": 1}},
-			},
-		},
-		{
-			name: "comparison without a value",
-			tool: "sqlserver_validate_table",
-			args: map[string]any{
-				"schema": "dbo", "table": "orders", "limit": 1,
-				"predicates": []any{map[string]any{"column": "id", "operator": "eq"}},
-			},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -243,8 +215,8 @@ func TestMCPRejectsUnknownAndInvalidInputsBeforeServiceCall(t *testing.T) {
 			if err == nil {
 				t.Fatal("CallTool() succeeded with invalid input")
 			}
-			if strings.Contains(err.Error(), "DELETE FROM orders") {
-				t.Fatalf("CallTool() validation error echoed the supplied SQL fragment: %v", err)
+			if strings.Contains(err.Error(), "customer@example.invalid") {
+				t.Fatalf("CallTool() validation error echoed the supplied row value: %v", err)
 			}
 		})
 	}

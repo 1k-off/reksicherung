@@ -27,58 +27,10 @@ type describeTableArgs struct {
 	Table  string `json:"table" jsonschema:"Table whose column metadata should be inspected."`
 }
 
-type predicateArgs struct {
-	Column   string             `json:"column" jsonschema:"Column to compare."`
-	Operator sqlserver.Operator `json:"operator" jsonschema:"One of eq, ne, lt, le, gt, ge, like, not_like, is_null, is_not_null."`
-	Value    any                `json:"value,omitempty" jsonschema:"JSON scalar comparison value; omit for is_null and is_not_null."`
-}
-
 type validateTableArgs struct {
-	Schema     string          `json:"schema" jsonschema:"Schema containing the table."`
-	Table      string          `json:"table" jsonschema:"Table to inspect."`
-	Predicates []predicateArgs `json:"predicates,omitempty" jsonschema:"Optional AND-combined bounded comparisons."`
-	Limit      int             `json:"limit" jsonschema:"Maximum matching rows to count (1 to 100)."`
-}
-
-func (args *predicateArgs) UnmarshalJSON(data []byte) error {
-	args.Value = nil
-	var input struct {
-		Column   string             `json:"column"`
-		Operator sqlserver.Operator `json:"operator"`
-		Value    json.RawMessage    `json:"value"`
-	}
-	if err := decodeStrictJSON(data, &input); err != nil {
-		return err
-	}
-	args.Column = input.Column
-	args.Operator = input.Operator
-
-	switch input.Operator {
-	case sqlserver.IsNull, sqlserver.IsNotNull:
-		if input.Value != nil {
-			return errors.New("null-check predicates must omit value")
-		}
-		return nil
-	case sqlserver.Equal, sqlserver.NotEqual, sqlserver.LessThan, sqlserver.LessOrEqual,
-		sqlserver.GreaterThan, sqlserver.GreaterEqual, sqlserver.Like, sqlserver.NotLike:
-		if input.Value == nil {
-			return errors.New("comparison predicates require a scalar value")
-		}
-	default:
-		return errors.New("unsupported predicate operator")
-	}
-
-	var value any
-	if err := json.Unmarshal(input.Value, &value); err != nil {
-		return errors.New("comparison predicates require a scalar value")
-	}
-	switch value.(type) {
-	case string, bool, float64:
-		args.Value = value
-	default:
-		return errors.New("comparison predicates require a scalar value")
-	}
-	return nil
+	Schema string `json:"schema" jsonschema:"Schema containing the table."`
+	Table  string `json:"table" jsonschema:"Table to inspect."`
+	Limit  int    `json:"limit" jsonschema:"Maximum total rows to count (1 to 100)."`
 }
 
 // Custom unmarshaling makes the typed handlers reject unknown JSON properties.
@@ -208,23 +160,16 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlserver_validate_table",
-		Description: "Count rows matching up to 8 AND-combined scalar predicates, capped at 100. Only the aggregate count and truncation flag are returned; raw SQL and projections are not accepted.",
+		Description: "Count total rows in one table, capped at 100. Caller-supplied predicates and row values are not accepted; only the aggregate count and truncation flag are returned.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args validateTableArgs) (*mcp.CallToolResult, validateTableOutput, error) {
-		predicates := make([]sqlserver.Predicate, 0, len(args.Predicates))
-		for _, predicate := range args.Predicates {
-			predicates = append(predicates, sqlserver.Predicate{
-				Column: predicate.Column, Operator: predicate.Operator, Value: predicate.Value,
-			})
-		}
 		result, err := service.Validate(ctx, sqlserver.ValidationQuery{
 			Table: sqlserver.TableRef{
 				Database: database,
 				Schema:   args.Schema,
 				Table:    args.Table,
 			},
-			Predicates: predicates,
-			Limit:      args.Limit,
+			Limit: args.Limit,
 		})
 		if err != nil {
 			return nil, validateTableOutput{}, safeToolError(err)
