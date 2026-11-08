@@ -198,7 +198,12 @@ func TestStorageBackedPipelineComposesSelectionOpenImportAndSQLOperations(t *tes
 	}
 	store := &pipelineTestStore{objects: objects, bodies: map[string][]byte{"backups/sql/newer.tar": archive}}
 	runtime := &pipelineTestRuntime{}
-	pipeline, err := NewStoragePipeline(store, runtime, container.MinContainerDiskBytes, Limits{
+	pipeline, err := NewStoragePipeline(func(_ context.Context, source config.S3Storage, maxObjectBytes int64) (storage.Store, error) {
+		if source.Type != "s3" || source.Prefix != "backups/sql" || maxObjectBytes != 1<<20 {
+			t.Errorf("storage factory config = (%#v, %d)", source, maxObjectBytes)
+		}
+		return store, nil
+	}, runtime, container.MinContainerDiskBytes, Limits{
 		MaxCompressedBytes:   1 << 20,
 		MaxUncompressedBytes: 1 << 20,
 		MaxBACPACBytes:       1 << 20,
@@ -260,9 +265,10 @@ func newPipelineTest(t *testing.T, runtime *pipelineTestRuntime, repository *pip
 		Runtime:       runtime,
 		DiskBytes:     2 * 1024 * 1024 * 1024,
 		ArchiveLimits: testLimits,
-		NewArtifacts: func(prefix string, maxObjectBytes int64) (ArtifactRepository, error) {
-			if prefix != "backups/sql/" || maxObjectBytes != testLimits.MaxCompressedBytes {
-				t.Errorf("artifact repository config = (%q, %d)", prefix, maxObjectBytes)
+		NewArtifacts: func(_ context.Context, source config.S3Storage, prefix string, maxObjectBytes int64) (ArtifactRepository, error) {
+			if source.Type != "s3" || source.Prefix != "backups/sql" ||
+				prefix != "backups/sql/" || maxObjectBytes != testLimits.MaxCompressedBytes {
+				t.Errorf("artifact repository config = (%#v, %q, %d)", source, prefix, maxObjectBytes)
 			}
 			return repository, nil
 		},

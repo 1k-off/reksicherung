@@ -15,6 +15,9 @@ container runtime, `Importer`, and SQL Server restore operations. It accepts a
 validated catalog source, a run ID, and the resolved per-run SQL Server
 password. The storage prefix must be configured explicitly; the catalog
 `selection` policy chooses either the newest object or one relative object ID.
+The storage factory receives the selected source's bucket, region, endpoint, and
+credential references for each run; it must resolve references without logging
+secret values and return a client bound to those coordinates.
 Only plain `.tar` and gzip-compressed `.tar.gz`/`.tgz` archives are accepted.
 
 The pipeline maps the catalog CPU, memory, image, and timeout limits into a

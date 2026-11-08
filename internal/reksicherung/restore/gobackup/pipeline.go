@@ -52,12 +52,17 @@ type DatabaseOperations interface {
 // without storage, SQL Server, or a container runtime.
 type Dependencies struct {
 	Runtime               container.Runtime
-	NewArtifacts          func(prefix string, maxObjectBytes int64) (ArtifactRepository, error)
+	NewArtifacts          func(context.Context, config.S3Storage, string, int64) (ArtifactRepository, error)
 	NewImporter           func(runtime container.Runtime, limits Limits, timeout time.Duration) (ImportOperation, error)
 	NewDatabaseOperations func(container.Container, string, string) (DatabaseOperations, error)
 	DiskBytes             int64
 	ArchiveLimits         Limits
 }
+
+// StoreFactory creates a storage client for the exact S3 coordinates and
+// secret references selected by a catalog source. Implementations are
+// responsible for resolving the configured references without logging values.
+type StoreFactory func(context.Context, config.S3Storage, int64) (storage.Store, error)
 
 // Pipeline composes storage selection, SQL Server lifecycle, import, integrity
 // command, and automatic container cleanup.
@@ -102,11 +107,13 @@ func NewPipeline(dependencies Dependencies) (*Pipeline, error) {
 	return &Pipeline{dependencies: dependencies}, nil
 }
 
-// NewStoragePipeline constructs the production adapters around the shared
-// storage and container interfaces. DiskBytes is the bounded writable-layer
-// limit; a non-positive value selects the 10 GiB default.
-func NewStoragePipeline(store storage.Store, runtime container.Runtime, diskBytes int64, limits Limits) (*Pipeline, error) {
-	if store == nil || runtime == nil {
+// NewStoragePipeline constructs the production adapters around per-source
+// storage clients and the container runtime. StoreFactory receives the catalog
+// S3 coordinates for each restore, so a pipeline cannot accidentally reuse a
+// client bound to a different bucket or endpoint. DiskBytes is the bounded
+// writable-layer limit; zero selects the 10 GiB default.
+func NewStoragePipeline(newStore StoreFactory, runtime container.Runtime, diskBytes int64, limits Limits) (*Pipeline, error) {
+	if newStore == nil || runtime == nil {
 		return nil, ErrInvalidPipelineConfig
 	}
 	if diskBytes == 0 {
@@ -116,7 +123,14 @@ func NewStoragePipeline(store storage.Store, runtime container.Runtime, diskByte
 		Runtime:       runtime,
 		DiskBytes:     diskBytes,
 		ArchiveLimits: limits,
-		NewArtifacts: func(prefix string, maxObjectBytes int64) (ArtifactRepository, error) {
+		NewArtifacts: func(ctx context.Context, sourceStorage config.S3Storage, prefix string, maxObjectBytes int64) (ArtifactRepository, error) {
+			store, err := newStore(ctx, sourceStorage, maxObjectBytes)
+			if err != nil {
+				return nil, err
+			}
+			if store == nil {
+				return nil, ErrInvalidPipelineConfig
+			}
 			return backupstore.New(store, backupstore.Config{
 				Prefix:         prefix,
 				MaxObjectBytes: maxObjectBytes,
@@ -175,7 +189,12 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 	defer cancel()
 
 	prefix := request.Source.Storage.Prefix + "/"
-	artifacts, err := pipeline.dependencies.NewArtifacts(prefix, pipeline.dependencies.ArchiveLimits.MaxCompressedBytes)
+	artifacts, err := pipeline.dependencies.NewArtifacts(
+		operationCtx,
+		request.Source.Storage,
+		prefix,
+		pipeline.dependencies.ArchiveLimits.MaxCompressedBytes,
+	)
 	if err != nil || artifacts == nil {
 		if operationCtx.Err() != nil {
 			return Result{}, operationCtx.Err()
