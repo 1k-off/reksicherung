@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/config"
+	"github.com/1k-off/reksicherung/internal/reksicherung/evidence"
 	backupstore "github.com/1k-off/reksicherung/internal/reksicherung/mcp/gobackup"
 	sqlserverrestore "github.com/1k-off/reksicherung/internal/reksicherung/restore/sqlserver"
 	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
@@ -24,11 +26,14 @@ const (
 
 func TestPipelineOrdersRestoreAndUsesBoundedRunResources(t *testing.T) {
 	var events []string
+	evidenceSink := &pipelineTestEvidence{runID: pipelineTestRunID}
 	repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "nightly.tar.gz"}}
 	runtime := &pipelineTestRuntime{events: &events}
 	pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
 
-	result, err := pipeline.Restore(context.Background(), pipelineTestRequest("latest", ""))
+	request := pipelineTestRequest("latest", "")
+	request.EvidenceSink = evidenceSink
+	result, err := pipeline.Restore(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Restore() error = %v", err)
 	}
@@ -60,16 +65,54 @@ func TestPipelineOrdersRestoreAndUsesBoundedRunResources(t *testing.T) {
 	if repository.openedID != "nightly.tar.gz" {
 		t.Fatalf("opened artifact ID = %q", repository.openedID)
 	}
+	assertEvidenceSequence(t, evidenceSink.events, []string{
+		"gobackup_selection:started", "gobackup_selection:succeeded",
+		"container_creation:started", "container_creation:succeeded",
+		"sql_readiness:started", "sql_readiness:succeeded",
+		"archive_open:started", "archive_open:succeeded",
+		"archive_import:started", "archive_import:succeeded",
+		"dbcc_checkdb:started", "dbcc_checkdb:succeeded",
+		"cleanup:started", "cleanup:succeeded",
+	})
+	for _, event := range evidenceSink.events {
+		if event.Timestamp.Location() != time.UTC || event.Timestamp.IsZero() {
+			t.Errorf("event timestamp is not UTC: %#v", event.Timestamp)
+		}
+		if event.Operation == "gobackup_selection" && event.Status == evidence.StatusSucceeded {
+			if event.Metadata["source_id"] != "test-source" ||
+				event.Metadata["backup_id"] != artifactEvidenceID("nightly.tar.gz") ||
+				len(event.Metadata["backup_id"]) != 64 {
+				t.Errorf("selection evidence identifiers = %#v", event.Metadata)
+			}
+		}
+		if event.Operation == "container_creation" && event.Status == evidence.StatusSucceeded &&
+			event.Metadata["resource_id"] != "container-id" {
+			t.Errorf("container creation evidence lacks resource identifier: %#v", event)
+		}
+		if event.Operation == "dbcc_checkdb" && event.Status == evidence.StatusSucceeded &&
+			event.Metadata["outcome"] != "command_completed" {
+			t.Errorf("DBCC event does not describe command completion only: %#v", event)
+		}
+	}
+	encoded, err := json.Marshal(evidenceSink.events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), pipelineTestSecret) || strings.Contains(string(encoded), "nightly.tar.gz") {
+		t.Fatalf("evidence contains secret or raw object identity: %s", encoded)
+	}
 }
 
 func TestPipelineExplicitSelectionAndRetainedMode(t *testing.T) {
 	var events []string
+	evidenceSink := &pipelineTestEvidence{runID: pipelineTestRunID}
 	repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "chosen.tgz"}}
 	runtime := &pipelineTestRuntime{events: &events}
 	pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
 
 	request := pipelineTestRequest("id", "chosen.tgz")
 	request.Source.Cleanup = "hold_for_review"
+	request.EvidenceSink = evidenceSink
 	result, err := pipeline.Restore(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Restore() error = %v", err)
@@ -83,6 +126,14 @@ func TestPipelineExplicitSelectionAndRetainedMode(t *testing.T) {
 	}
 	if repository.selectedID != "chosen.tgz" {
 		t.Fatalf("selected ID = %q, want chosen.tgz", repository.selectedID)
+	}
+	last := evidenceSink.events[len(evidenceSink.events)-1]
+	if last.Operation != "cleanup" || last.Status != evidence.StatusSkipped ||
+		last.Metadata["outcome"] != "retained" || last.Metadata["resource_id"] != "container-id" {
+		t.Fatalf("retained cleanup evidence = %#v", last)
+	}
+	if runtime.removeCalls != 0 {
+		t.Fatalf("retained mode removed container %d times", runtime.removeCalls)
 	}
 }
 
@@ -149,6 +200,7 @@ func TestPipelineSurfacesSanitizedCleanupFailure(t *testing.T) {
 
 func TestPipelineCancellationStillCleansUpWithoutCanceledContext(t *testing.T) {
 	var events []string
+	evidenceSink := &pipelineTestEvidence{runID: pipelineTestRunID}
 	ctx, cancel := context.WithCancel(context.Background())
 	repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "nightly.tar"}}
 	runtime := &pipelineTestRuntime{events: &events}
@@ -161,12 +213,148 @@ func TestPipelineCancellationStillCleansUpWithoutCanceledContext(t *testing.T) {
 	}
 	pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, operations)
 
-	_, err := pipeline.Restore(ctx, pipelineTestRequest("latest", ""))
+	request := pipelineTestRequest("latest", "")
+	request.EvidenceSink = evidenceSink
+	_, err := pipeline.Restore(ctx, request)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Restore() error = %v, want context.Canceled", err)
 	}
 	if runtime.removeCalls != 1 || runtime.removeContextErr != nil {
 		t.Fatalf("cleanup calls=%d cleanup context error=%v", runtime.removeCalls, runtime.removeContextErr)
+	}
+	assertEvidenceSequence(t, evidenceSink.events, []string{
+		"gobackup_selection:started", "gobackup_selection:succeeded",
+		"container_creation:started", "container_creation:succeeded",
+		"sql_readiness:started", "sql_readiness:canceled",
+		"cleanup:started", "cleanup:succeeded",
+	})
+}
+
+func TestPipelineEvidenceAppendFailureIsFailSafe(t *testing.T) {
+	t.Run("before selection side effect", func(t *testing.T) {
+		var events []string
+		sink := &pipelineTestEvidence{
+			runID: pipelineTestRunID,
+			fail: func(event evidence.Event) bool {
+				return event.Operation == "gobackup_selection" && event.Status == evidence.StatusStarted
+			},
+		}
+		runtime := &pipelineTestRuntime{events: &events}
+		repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "nightly.tar"}}
+		pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
+		request := pipelineTestRequest("latest", "")
+		request.EvidenceSink = sink
+
+		_, err := pipeline.Restore(context.Background(), request)
+		if !errors.Is(err, ErrEvidenceAppend) {
+			t.Fatalf("Restore() error = %v, want ErrEvidenceAppend", err)
+		}
+		if len(events) != 0 || runtime.startCalls != 0 {
+			t.Fatalf("side effects started after evidence failure: events=%v starts=%d", events, runtime.startCalls)
+		}
+	})
+
+	t.Run("after container creation still cleans up", func(t *testing.T) {
+		var events []string
+		sink := &pipelineTestEvidence{
+			runID: pipelineTestRunID,
+			fail: func(event evidence.Event) bool {
+				return event.Operation == "container_creation" && event.Status == evidence.StatusSucceeded
+			},
+		}
+		runtime := &pipelineTestRuntime{events: &events}
+		repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "nightly.tar"}}
+		pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
+		request := pipelineTestRequest("latest", "")
+		request.EvidenceSink = sink
+
+		_, err := pipeline.Restore(context.Background(), request)
+		if !errors.Is(err, ErrEvidenceAppend) {
+			t.Fatalf("Restore() error = %v, want ErrEvidenceAppend", err)
+		}
+		if runtime.removeCalls != 1 || events[len(events)-1] != "remove" {
+			t.Fatalf("container was not cleaned after evidence failure: calls=%d events=%v", runtime.removeCalls, events)
+		}
+		assertEvidenceSequence(t, sink.events, []string{
+			"gobackup_selection:started", "gobackup_selection:succeeded",
+			"container_creation:started", "cleanup:started", "cleanup:succeeded",
+		})
+	})
+}
+
+func TestPipelineCleanupStillRunsWhenCleanupEvidenceAppendFails(t *testing.T) {
+	var events []string
+	sink := &pipelineTestEvidence{
+		runID: pipelineTestRunID,
+		fail: func(event evidence.Event) bool {
+			return event.Operation == "cleanup" && event.Status == evidence.StatusStarted
+		},
+	}
+	runtime := &pipelineTestRuntime{events: &events}
+	repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "nightly.tar"}}
+	pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
+	request := pipelineTestRequest("latest", "")
+	request.EvidenceSink = sink
+
+	_, err := pipeline.Restore(context.Background(), request)
+	if !errors.Is(err, ErrEvidenceAppend) {
+		t.Fatalf("Restore() error = %v, want ErrEvidenceAppend", err)
+	}
+	if runtime.removeCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1 despite evidence failure", runtime.removeCalls)
+	}
+}
+
+func TestPipelineRecordsSanitizedFailureAndCleanupFailure(t *testing.T) {
+	var events []string
+	sink := &pipelineTestEvidence{runID: pipelineTestRunID}
+	repository := &pipelineTestRepository{
+		events: &events, selected: backupstore.Backup{ID: "nightly.tar"},
+		openErr: errors.New("provider runtime detail " + pipelineTestSecret),
+	}
+	runtime := &pipelineTestRuntime{events: &events, removeErr: errors.New("runtime detail " + pipelineTestSecret)}
+	pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
+	request := pipelineTestRequest("latest", "")
+	request.EvidenceSink = sink
+
+	_, err := pipeline.Restore(context.Background(), request)
+	if err == nil || strings.Contains(err.Error(), pipelineTestSecret) || strings.Contains(err.Error(), "runtime detail") {
+		t.Fatalf("Restore() error is missing or unsafe: %v", err)
+	}
+	assertEvidenceSequence(t, sink.events, []string{
+		"gobackup_selection:started", "gobackup_selection:succeeded",
+		"container_creation:started", "container_creation:succeeded",
+		"sql_readiness:started", "sql_readiness:succeeded",
+		"archive_open:started", "archive_open:failed",
+		"cleanup:started", "cleanup:failed",
+	})
+	encoded, marshalErr := json.Marshal(sink.events)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	if strings.Contains(string(encoded), pipelineTestSecret) || strings.Contains(string(encoded), "provider runtime detail") {
+		t.Fatalf("failure evidence leaked runtime details: %s", encoded)
+	}
+	for _, event := range sink.events {
+		if event.Status == evidence.StatusFailed && event.Error != "restore operation failed" && event.Error != "container cleanup failed" {
+			t.Errorf("failed event has non-generic error: %#v", event)
+		}
+	}
+}
+
+func TestPipelineRequiresEvidenceRunIDMatch(t *testing.T) {
+	var events []string
+	runtime := &pipelineTestRuntime{events: &events}
+	pipeline := newPipelineTest(t, runtime, &pipelineTestRepository{events: &events}, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
+	request := pipelineTestRequest("latest", "")
+	request.EvidenceSink = &pipelineTestEvidence{runID: "other-run"}
+
+	_, err := pipeline.Restore(context.Background(), request)
+	if !errors.Is(err, ErrEvidenceAppend) {
+		t.Fatalf("Restore() error = %v, want sanitized evidence append failure", err)
+	}
+	if runtime.startCalls != 0 || len(events) != 0 {
+		t.Fatalf("run ID mismatch allowed side effects: starts=%d events=%v", runtime.startCalls, events)
 	}
 }
 
@@ -240,6 +428,7 @@ func TestPipelineRejectsInvalidRequestsBeforeStartingContainer(t *testing.T) {
 		{name: "invalid selection", change: func(request *Request) { request.Source.Selection.Policy = "anything" }},
 		{name: "missing explicit ID", change: func(request *Request) { request.Source.Selection.Policy = "id" }},
 		{name: "invalid cleanup", change: func(request *Request) { request.Source.Cleanup = "unknown" }},
+		{name: "missing evidence sink", change: func(request *Request) { request.EvidenceSink = nil }},
 		{name: "oversized password", change: func(request *Request) { request.Password = strings.Repeat("x", 4097) }},
 	}
 	for _, test := range tests {
@@ -294,8 +483,10 @@ func newPipelineTest(t *testing.T, runtime *pipelineTestRuntime, repository *pip
 
 func pipelineTestRequest(policy, id string) Request {
 	return Request{
-		RunID: pipelineTestRunID,
+		RunID:        pipelineTestRunID,
+		EvidenceSink: &pipelineTestEvidence{runID: pipelineTestRunID},
 		Source: config.BackupSource{
+			ID:       "test-source",
 			Provider: "gobackup",
 			Storage: config.S3Storage{
 				Type:   "s3",
@@ -311,6 +502,40 @@ func pipelineTestRequest(policy, id string) Request {
 			Cleanup: "delete",
 		},
 		Password: pipelineTestSecret,
+	}
+}
+
+type pipelineTestEvidence struct {
+	runID  string
+	events []evidence.Event
+	fail   func(evidence.Event) bool
+}
+
+func (sink *pipelineTestEvidence) Append(ctx context.Context, event evidence.Event) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if event.RunID != sink.runID {
+		return evidence.ErrRunIDMismatch
+	}
+	if err := event.Validate(); err != nil {
+		return err
+	}
+	if sink.fail != nil && sink.fail(event) {
+		return errors.New("evidence recorder detail " + pipelineTestSecret)
+	}
+	sink.events = append(sink.events, event)
+	return nil
+}
+
+func assertEvidenceSequence(t *testing.T, events []evidence.Event, want []string) {
+	t.Helper()
+	got := make([]string, len(events))
+	for index, event := range events {
+		got[index] = string(event.Operation) + ":" + string(event.Status)
+	}
+	if !equalStrings(got, want) {
+		t.Fatalf("evidence sequence = %v, want %v", got, want)
 	}
 }
 
