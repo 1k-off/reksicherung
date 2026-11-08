@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	sqlserverrestore "github.com/1k-off/reksicherung/internal/reksicherung/restore/sqlserver"
 	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
@@ -38,8 +39,9 @@ type Importer struct {
 	timeout time.Duration
 }
 
-// ImportOptions contains the per-run SQL Server target credentials. The server
-// itself is always the local SQL Server in the target container.
+// ImportOptions contains the per-run SQL Server target credentials. Database
+// must be the run-scoped name returned by sqlserver.DatabaseNameForRun. The
+// server itself is always the local SQL Server in the target container.
 type ImportOptions struct {
 	Database string
 	Username string
@@ -88,6 +90,12 @@ func (importer *Importer) Import(ctx context.Context, target container.Container
 	if ctx == nil {
 		_ = archive.Close()
 		return errors.New("context must not be nil")
+	}
+	expectedDatabase, databaseErr := sqlserverrestore.DatabaseNameForRun(target.RunID)
+	if target.ID == "" || target.Name != container.ContainerName(target.RunID) ||
+		databaseErr != nil || options.Database != expectedDatabase {
+		_ = archive.Close()
+		return errors.New("GoBackup import requires the database bound to the restore run")
 	}
 	if err := validateImportOptions(options); err != nil {
 		_ = archive.Close()

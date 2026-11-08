@@ -3,24 +3,28 @@
 GoBackup SQL Server archives contain a BACPAC export, not a native SQL Server
 `.bak`. `Importer` streams the one validated BACPAC member from the tar archive
 to `/var/opt/mssql/backup/reksicherung-import.bacpac` in the owned restore
-container, then invokes SqlPackage's `Import` action against `localhost`.
+container, then invokes SqlPackage's `Import` action against `localhost`. The
+target database name must be derived from the managed run ID by
+`restore/sqlserver.DatabaseNameForRun`; this prevents the importer and cleanup
+adapter from targeting SQL Server system databases or unrelated databases.
 
 ## Required restore image
 
 The adapter does not make the stock
 `mcr.microsoft.com/mssql/server:2022-latest` image import-capable by itself.
-That image must be replaced or extended with a compatible Linux SqlPackage
-installation at the fixed path `/opt/sqlpackage/sqlpackage`, its required
-runtime dependencies, `/bin/sh`, GNU `timeout` at `/usr/bin/timeout`, and the
-`mkdir`, `tee`, `mv`, and `rm` utilities used by the container runtime. The SQL
-Server process must be configured to listen on localhost port 1433, and the
-supplied temporary SQL login must be authorized to create/import the target
-database. Pin and validate a SqlPackage release compatible with SQL Server
-2022 when building that image.
+The reproducible amd64 image definition is in
+[`image/`](image/README.md). It pins a SQL Server 2022 base image and SqlPackage
+170.2.70.1, and its build checks for SqlPackage, GNU `timeout` at
+`/usr/bin/timeout`, `/opt/mssql-tools18/bin/sqlcmd`, and the shell/file
+utilities required by the container runtime. Build and smoke-check instructions,
+source provenance, architecture, and license assumptions are documented there.
 
-Until an image satisfying and testing these requirements is provided, this is
-an adapter contract and unit-tested invocation path, not a verified
-end-to-end integration with the stock SQL Server image.
+The image checks verify executable presence and SqlPackage's reported version;
+they do not exercise a BACPAC import. The SQL Server process must be configured
+to listen on localhost port 1433, and the supplied temporary SQL login must be
+authorized to create/import the target database. Compatibility of this
+SqlPackage release with actual GoBackup BACPAC archives and SQL Server 2022 is
+not claimed until a representative end-to-end import is tested.
 
 ## Secret and process visibility
 

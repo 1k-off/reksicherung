@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	sqlserverrestore "github.com/1k-off/reksicherung/internal/reksicherung/restore/sqlserver"
 	"github.com/1k-off/reksicherung/internal/reksicherung/runtime/container"
 )
 
@@ -20,7 +21,7 @@ func TestImporterStreamsAndImportsBACPAC(t *testing.T) {
 	archive := makeArchive(t, []tarEntry{{name: "nested/db.bacpac", body: "bacpac bytes"}}, FormatTarGzip)
 
 	if err := importer.Import(context.Background(), testContainer(), io.NopCloser(bytes.NewReader(archive)), FormatTarGzip, ImportOptions{
-		Database: "check_db",
+		Database: testDatabase(t),
 		Username: "restore_user",
 		Password: password,
 	}); err != nil {
@@ -45,7 +46,7 @@ func TestImporterStreamsAndImportsBACPAC(t *testing.T) {
 		gotEnvironment[variable.Name] = variable.Value
 	}
 	timeoutSeconds, timeoutErr := strconv.ParseFloat(gotEnvironment["REKSICHERUNG_SQLPACKAGE_TIMEOUT"], 64)
-	if gotEnvironment["REKSICHERUNG_DB_NAME"] != "check_db" ||
+	if gotEnvironment["REKSICHERUNG_DB_NAME"] != testDatabase(t) ||
 		gotEnvironment["REKSICHERUNG_DB_USER"] != "restore_user" ||
 		gotEnvironment["REKSICHERUNG_DB_PASSWORD"] != password ||
 		timeoutErr != nil || timeoutSeconds <= 0 || timeoutSeconds > 60 {
@@ -63,10 +64,10 @@ func TestImporterRejectsUnsafeConnectionParametersBeforeTransfer(t *testing.T) {
 	}{
 		{name: "database option injection", options: ImportOptions{Database: "db /Action:Export", Username: "restore", Password: "secret"}},
 		{name: "database over SQL Server limit", options: ImportOptions{Database: strings.Repeat("a", 129), Username: "restore", Password: "secret"}},
-		{name: "username option injection", options: ImportOptions{Database: "db", Username: `user"; touch /tmp/no`, Password: "secret"}},
-		{name: "empty password", options: ImportOptions{Database: "db", Username: "restore"}},
-		{name: "password newline", options: ImportOptions{Database: "db", Username: "restore", Password: "secret\nvalue"}},
-		{name: "password too long", options: ImportOptions{Database: "db", Username: "restore", Password: strings.Repeat("x", 4097)}},
+		{name: "username option injection", options: ImportOptions{Database: testDatabase(t), Username: `user"; touch /tmp/no`, Password: "secret"}},
+		{name: "empty password", options: ImportOptions{Database: testDatabase(t), Username: "restore"}},
+		{name: "password newline", options: ImportOptions{Database: testDatabase(t), Username: "restore", Password: "secret\nvalue"}},
+		{name: "password too long", options: ImportOptions{Database: testDatabase(t), Username: "restore", Password: strings.Repeat("x", 4097)}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -83,6 +84,24 @@ func TestImporterRejectsUnsafeConnectionParametersBeforeTransfer(t *testing.T) {
 	}
 }
 
+func TestImporterRejectsDatabaseOutsideRestoreRun(t *testing.T) {
+	runtime := &fakeImportRuntime{}
+	importer := newTestImporter(t, runtime)
+	err := importer.Import(
+		context.Background(),
+		testContainer(),
+		io.NopCloser(strings.NewReader("unused")),
+		FormatTar,
+		ImportOptions{Database: "master", Username: "restore", Password: "secret"},
+	)
+	if err == nil || err.Error() != "GoBackup import requires the database bound to the restore run" {
+		t.Fatalf("Import() error = %v, want run-bound database rejection", err)
+	}
+	if runtime.transfers != 0 || len(runtime.execCommands) != 0 {
+		t.Fatalf("runtime called for unowned database: transfers=%d imports=%d", runtime.transfers, len(runtime.execCommands))
+	}
+}
+
 func TestImporterSanitizesSqlPackageFailure(t *testing.T) {
 	runtime := &fakeImportRuntime{
 		execErr: errors.New("failed with secret value"),
@@ -91,7 +110,7 @@ func TestImporterSanitizesSqlPackageFailure(t *testing.T) {
 	importer := newTestImporter(t, runtime)
 	err := importer.Import(context.Background(), testContainer(), io.NopCloser(bytes.NewReader(
 		makeArchive(t, []tarEntry{{name: "db.bacpac", body: "payload"}}, FormatTar),
-	)), FormatTar, ImportOptions{Database: "db", Username: "restore", Password: "secret value"})
+	)), FormatTar, ImportOptions{Database: testDatabase(t), Username: "restore", Password: "secret value"})
 	if err == nil || err.Error() != "SqlPackage BACPAC import failed" {
 		t.Fatalf("Import() error = %v, want sanitized SqlPackage failure", err)
 	}
@@ -109,7 +128,7 @@ func TestImporterSanitizesArtifactCleanupFailure(t *testing.T) {
 	importer := newTestImporter(t, runtime)
 	err := importer.Import(context.Background(), testContainer(), io.NopCloser(bytes.NewReader(
 		makeArchive(t, []tarEntry{{name: "db.bacpac", body: "payload"}}, FormatTar),
-	)), FormatTar, ImportOptions{Database: "db", Username: "restore", Password: "secret"})
+	)), FormatTar, ImportOptions{Database: testDatabase(t), Username: "restore", Password: "secret"})
 	if err == nil || !strings.Contains(err.Error(), "remove BACPAC artifact") {
 		t.Fatalf("Import() error = %v, want sanitized artifact cleanup failure", err)
 	}
@@ -123,7 +142,7 @@ func TestImporterRejectsOversizedSqlPackageOutput(t *testing.T) {
 	importer := newTestImporter(t, runtime)
 	err := importer.Import(context.Background(), testContainer(), io.NopCloser(bytes.NewReader(
 		makeArchive(t, []tarEntry{{name: "db.bacpac", body: "payload"}}, FormatTar),
-	)), FormatTar, ImportOptions{Database: "db", Username: "restore", Password: "secret"})
+	)), FormatTar, ImportOptions{Database: testDatabase(t), Username: "restore", Password: "secret"})
 	if err == nil || err.Error() != "SqlPackage BACPAC import failed" {
 		t.Fatalf("Import() error = %v, want sanitized output-limit failure", err)
 	}
@@ -140,7 +159,7 @@ func TestImporterUsesBoundedTimeout(t *testing.T) {
 	}
 	err = importer.Import(context.Background(), testContainer(), io.NopCloser(bytes.NewReader(
 		makeArchive(t, []tarEntry{{name: "db.bacpac", body: "payload"}}, FormatTar),
-	)), FormatTar, ImportOptions{Database: "db", Username: "restore", Password: "secret"})
+	)), FormatTar, ImportOptions{Database: testDatabase(t), Username: "restore", Password: "secret"})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Import() error = %v, want context.DeadlineExceeded", err)
 	}
@@ -154,7 +173,7 @@ func TestImporterDoesNotInvokeSqlPackageForInvalidArchive(t *testing.T) {
 	importer := newTestImporter(t, runtime)
 	err := importer.Import(context.Background(), testContainer(), io.NopCloser(bytes.NewReader(
 		makeArchive(t, []tarEntry{{name: "../outside.bacpac", body: "payload"}}, FormatTar),
-	)), FormatTar, ImportOptions{Database: "db", Username: "restore", Password: "secret"})
+	)), FormatTar, ImportOptions{Database: testDatabase(t), Username: "restore", Password: "secret"})
 	if !errors.Is(err, ErrUnsafePath) {
 		t.Fatalf("Import() error = %v, want ErrUnsafePath", err)
 	}
@@ -177,6 +196,15 @@ func newTestImporter(t *testing.T, runtime Runtime) *Importer {
 
 func testContainer() container.Container {
 	return container.Container{ID: "owned-container", Name: "reksicherung-test", RunID: "test"}
+}
+
+func testDatabase(t *testing.T) string {
+	t.Helper()
+	database, err := sqlserverrestore.DatabaseNameForRun(testContainer().RunID)
+	if err != nil {
+		t.Fatalf("DatabaseNameForRun() error = %v", err)
+	}
+	return database
 }
 
 type fakeImportRuntime struct {
