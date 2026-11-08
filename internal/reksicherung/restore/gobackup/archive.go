@@ -1,8 +1,9 @@
-// Package gobackup streams BACPAC files from GoBackup tar archives.
+// Package gobackup streams BACPAC files from GoBackup tar archives and imports
+// them into an isolated SQL Server container with SqlPackage.
 //
 // Only plain tar and gzip-compressed tar (.tar.gz/.tgz) archives are supported.
 // Encrypted and split archives are intentionally unsupported. The package does
-// not extract paths, invoke subprocesses, or write to the host filesystem.
+// not extract archive paths or write BACPAC data to the host filesystem.
 package gobackup
 
 import (
