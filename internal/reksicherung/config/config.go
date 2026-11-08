@@ -31,14 +31,15 @@ type Catalog struct {
 
 // BackupSource describes one independently restorable SQL Server backup.
 type BackupSource struct {
-	ID         string    `yaml:"id"`
-	Provider   string    `yaml:"provider"`
-	BackupName string    `yaml:"backupName"`
-	Database   Database  `yaml:"database"`
-	Storage    S3Storage `yaml:"storage"`
-	Selection  Selection `yaml:"selection"`
-	Restore    Restore   `yaml:"restore"`
-	Cleanup    string    `yaml:"cleanup"`
+	ID         string            `yaml:"id"`
+	Provider   string            `yaml:"provider"`
+	BackupName string            `yaml:"backupName"`
+	Database   Database          `yaml:"database"`
+	Storage    S3Storage         `yaml:"storage"`
+	Selection  Selection         `yaml:"selection"`
+	Restore    Restore           `yaml:"restore"`
+	Validation ValidationProfile `yaml:"validation,omitempty"`
+	Cleanup    string            `yaml:"cleanup"`
 }
 
 type Database struct {
@@ -74,6 +75,13 @@ type Restore struct {
 	Timeout   string `yaml:"timeout"`
 }
 
+// ValidationProfile enables optional AI-assisted semantic review and can
+// document tables that are known to be legitimately empty.
+type ValidationProfile struct {
+	SemanticReview      bool     `yaml:"semanticReview,omitempty"`
+	ExpectedEmptyTables []string `yaml:"expectedEmptyTables,omitempty"`
+}
+
 // Decode parses exactly one YAML document, rejects unknown fields, and
 // validates all references before returning the catalog.
 func Decode(data []byte) (Catalog, error) {
@@ -82,7 +90,7 @@ func Decode(data []byte) (Catalog, error) {
 
 	var catalog Catalog
 	if err := decoder.Decode(&catalog); err != nil {
-		return Catalog{}, fmt.Errorf("decode catalog: %w", err)
+		return Catalog{}, errors.New("decode catalog: invalid YAML document or unsupported field")
 	}
 
 	var extra any
@@ -90,7 +98,7 @@ func Decode(data []byte) (Catalog, error) {
 		if err == nil {
 			return Catalog{}, errors.New("decode catalog: multiple YAML documents are not allowed")
 		}
-		return Catalog{}, fmt.Errorf("decode catalog: %w", err)
+		return Catalog{}, errors.New("decode catalog: invalid trailing YAML document")
 	}
 
 	if err := catalog.Validate(); err != nil {
@@ -118,9 +126,23 @@ func (catalog Catalog) Validate() error {
 			return fmt.Errorf("backups[%d]: %w", i, err)
 		}
 		if _, exists := ids[backup.ID]; exists {
-			return fmt.Errorf("backups[%d]: duplicate id %q", i, backup.ID)
+			return fmt.Errorf("backups[%d]: duplicate backup id", i)
 		}
 		ids[backup.ID] = struct{}{}
+	}
+	return nil
+}
+
+// ValidateProduction applies deployment-specific checks stricter than local
+// development validation, including immutable restore image digests.
+func (catalog Catalog) ValidateProduction() error {
+	if err := catalog.Validate(); err != nil {
+		return err
+	}
+	for i, backup := range catalog.Backups {
+		if !isDigestPinned(backup.Restore.Image) {
+			return fmt.Errorf("backups[%d]: production restore image must be pinned by sha256 digest", i)
+		}
 	}
 	return nil
 }
@@ -159,8 +181,29 @@ func (backup BackupSource) validate() error {
 	if err := backup.Restore.validate(); err != nil {
 		return fmt.Errorf("restore: %w", err)
 	}
+	if err := backup.Validation.validate(); err != nil {
+		return fmt.Errorf("validation: %w", err)
+	}
 	if backup.Cleanup != "delete" && backup.Cleanup != "hold_for_review" {
 		return errors.New("cleanup must be delete or hold_for_review")
+	}
+	return nil
+}
+
+func (profile ValidationProfile) validate() error {
+	seen := make(map[string]struct{}, len(profile.ExpectedEmptyTables))
+	for _, table := range profile.ExpectedEmptyTables {
+		if !validTableReference(table) {
+			return errors.New("expectedEmptyTables entries must be schema.table names")
+		}
+		key := strings.ToLower(table)
+		if _, exists := seen[key]; exists {
+			return errors.New("expectedEmptyTables entries must be unique")
+		}
+		seen[key] = struct{}{}
+	}
+	if len(profile.ExpectedEmptyTables) > 0 && !profile.SemanticReview {
+		return errors.New("expectedEmptyTables requires semanticReview to be enabled")
 	}
 	return nil
 }
@@ -261,11 +304,50 @@ func validBucket(value string) bool {
 		net.ParseIP(value) != nil {
 		return false
 	}
-	for _, r := range value {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
-			continue
+	for _, label := range strings.Split(value, ".") {
+		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
 		}
+		for _, r := range label {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func validTableReference(table string) bool {
+	if len(table) > 257 || strings.TrimSpace(table) != table {
 		return false
+	}
+	parts := strings.Split(table, ".")
+	if len(parts) != 2 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || len(part) > 128 || strings.TrimSpace(part) != part {
+			return false
+		}
+		for _, r := range part {
+			if unicode.IsControl(r) || r == '.' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isDigestPinned(image string) bool {
+	_, digest, found := strings.Cut(image, "@sha256:")
+	if !found || len(digest) != 64 {
+		return false
+	}
+	for _, r := range digest {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
 	}
 	return true
 }

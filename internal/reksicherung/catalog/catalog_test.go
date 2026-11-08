@@ -16,12 +16,22 @@ func TestFromConfigProducesDeterministicSecretFreeInventory(t *testing.T) {
 	second.BackupName = "another-backup"
 	source.Backups = append(source.Backups, second)
 
-	inventory, err := FromConfig(source)
+	inventory, err := FromConfig(source, "configs/catalog.yaml")
 	if err != nil {
 		t.Fatalf("FromConfig() error = %v", err)
 	}
 	if got := inventory.Backups[0].ID; got != "another-source" {
 		t.Fatalf("inventory order starts with %q, want another-source", got)
+	}
+	if got := inventory.Backups[0].SourceLocation; got != "configs/catalog.yaml#backups/another-source" {
+		t.Fatalf("source location = %q", got)
+	}
+	if len(inventory.Backups[0].Checks) != 3 || inventory.Backups[0].Checks[2] != "semantic-review" {
+		t.Fatalf("configured checks = %v", inventory.Backups[0].Checks)
+	}
+	if len(inventory.Backups[0].ExpectedEmptyTables) != 1 ||
+		inventory.Backups[0].ExpectedEmptyTables[0] != "dbo.AuditLog" {
+		t.Fatalf("expected-empty tables = %v", inventory.Backups[0].ExpectedEmptyTables)
 	}
 
 	firstJSON, err := inventory.Marshal()
@@ -60,8 +70,16 @@ func TestFromConfigProducesDeterministicSecretFreeInventory(t *testing.T) {
 func TestFromConfigRejectsInvalidCatalog(t *testing.T) {
 	source := validSource(t)
 	source.Backups[0].Restore.MemoryMiB = 0
-	if _, err := FromConfig(source); err == nil {
+	if _, err := FromConfig(source, "catalog.yaml"); err == nil {
 		t.Fatal("FromConfig() accepted invalid source")
+	}
+}
+
+func TestFromConfigRejectsUnsafeSourceLocations(t *testing.T) {
+	for _, location := range []string{"", "/etc/catalog.yaml", "../catalog.yaml", "dir//catalog.yaml"} {
+		if _, err := FromConfig(validSource(t), location); err == nil {
+			t.Errorf("FromConfig(source, %q) succeeded", location)
+		}
 	}
 }
 
@@ -103,6 +121,10 @@ backups:
       cpuMilli: 1000
       memoryMiB: 2048
       timeout: 1h
+    validation:
+      semanticReview: true
+      expectedEmptyTables:
+        - dbo.AuditLog
     cleanup: delete
 `
 	source, err := config.Decode([]byte(yaml))

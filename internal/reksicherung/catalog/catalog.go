@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
+	"unicode"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/config"
 )
@@ -25,13 +27,15 @@ type Inventory struct {
 }
 
 type Entry struct {
-	ID         string    `json:"id"`
-	Provider   string    `json:"provider"`
-	BackupName string    `json:"backupName"`
-	Database   Database  `json:"database"`
-	Storage    Storage   `json:"storage"`
-	Selection  Selection `json:"selection"`
-	Checks     []string  `json:"checks"`
+	ID                  string    `json:"id"`
+	SourceLocation      string    `json:"sourceLocation"`
+	Provider            string    `json:"provider"`
+	BackupName          string    `json:"backupName"`
+	Database            Database  `json:"database"`
+	Storage             Storage   `json:"storage"`
+	Selection           Selection `json:"selection"`
+	Checks              []string  `json:"checks"`
+	ExpectedEmptyTables []string  `json:"expectedEmptyTables,omitempty"`
 }
 
 type Database struct {
@@ -52,17 +56,25 @@ type Selection struct {
 
 // FromConfig validates and converts a catalog into deterministic inventory
 // order. IDs are sorted because source YAML order does not affect identity.
-func FromConfig(source config.Catalog) (Inventory, error) {
+func FromConfig(source config.Catalog, sourceLocation string) (Inventory, error) {
 	if err := source.Validate(); err != nil {
 		return Inventory{}, fmt.Errorf("build inventory: %w", err)
+	}
+	if !validSourceLocation(sourceLocation) {
+		return Inventory{}, errors.New("build inventory: source location must be a safe relative path")
 	}
 
 	entries := make([]Entry, 0, len(source.Backups))
 	for _, backup := range source.Backups {
+		checks := []string{"restore", "sqlserver-integrity"}
+		if backup.Validation.SemanticReview {
+			checks = append(checks, "semantic-review")
+		}
 		entries = append(entries, Entry{
-			ID:         backup.ID,
-			Provider:   backup.Provider,
-			BackupName: backup.BackupName,
+			ID:             backup.ID,
+			SourceLocation: sourceLocation + "#backups/" + backup.ID,
+			Provider:       backup.Provider,
+			BackupName:     backup.BackupName,
 			Database: Database{
 				Type: backup.Database.Type,
 				Name: backup.Database.Name,
@@ -76,7 +88,8 @@ func FromConfig(source config.Catalog) (Inventory, error) {
 				Policy: backup.Selection.Policy,
 				ID:     backup.Selection.ID,
 			},
-			Checks: []string{"restore", "sqlserver-integrity", "semantic-review"},
+			Checks:              checks,
+			ExpectedEmptyTables: append([]string(nil), backup.Validation.ExpectedEmptyTables...),
 		})
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].ID < entries[j].ID })
@@ -85,6 +98,28 @@ func FromConfig(source config.Catalog) (Inventory, error) {
 		Kind:       Kind,
 		Backups:    entries,
 	}, nil
+}
+
+func validSourceLocation(location string) bool {
+	if location == "" || len(location) > 512 || strings.HasPrefix(location, "/") ||
+		strings.ContainsAny(location, "\\#?") {
+		return false
+	}
+	for _, segment := range strings.Split(location, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+		for _, r := range segment {
+			if unicode.IsControl(r) {
+				return false
+			}
+			alphaNum := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+			if !alphaNum && r != '.' && r != '_' && r != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Marshal returns compact deterministic JSON suitable for an Airon string

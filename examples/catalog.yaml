@@ -8,6 +8,7 @@ backups:
       type: sqlserver
       name: Example
     storage:
+      type: s3
       # Omit endpoint to use the provider's AWS S3 endpoint.
       endpoint: https://minio.example.test
       bucket: backup-data
@@ -24,4 +25,6 @@ backups:
       cpuMilli: 2000
       memoryMiB: 4096
       timeout: 2h
+    validation:
+      semanticReview: true
     cleanup: delete

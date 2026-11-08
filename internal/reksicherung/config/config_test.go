@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -30,6 +31,10 @@ backups:
       cpuMilli: 2000
       memoryMiB: 4096
       timeout: 2h
+    validation:
+      semanticReview: true
+      expectedEmptyTables:
+        - dbo.AuditLog
     cleanup: delete
 `
 
@@ -47,6 +52,16 @@ func TestDecodeValidCatalog(t *testing.T) {
 	}
 }
 
+func TestDecodeRepositoryExampleCatalog(t *testing.T) {
+	data, err := os.ReadFile("../../../examples/catalog.yaml")
+	if err != nil {
+		t.Fatalf("ReadFile(example) error = %v", err)
+	}
+	if _, err := Decode(data); err != nil {
+		t.Fatalf("Decode(example) error = %v", err)
+	}
+}
+
 func TestDecodeRejectsMalformedOrAmbiguousDocuments(t *testing.T) {
 	tests := []struct {
 		name string
@@ -56,7 +71,7 @@ func TestDecodeRejectsMalformedOrAmbiguousDocuments(t *testing.T) {
 		{
 			name: "unknown field",
 			data: strings.Replace(validCatalogYAML, "    provider:", "    password: should-not-be-accepted\n    provider:", 1),
-			want: "field password not found",
+			want: "invalid YAML document or unsupported field",
 		},
 		{
 			name: "second document",
@@ -71,7 +86,12 @@ func TestDecodeRejectsMalformedOrAmbiguousDocuments(t *testing.T) {
 		{
 			name: "literal secret field",
 			data: strings.Replace(validCatalogYAML, "        accessKeyRef:", "        accessKey: should-not-be-accepted\n        accessKeyRef:", 1),
-			want: "field accessKey not found",
+			want: "invalid YAML document or unsupported field",
+		},
+		{
+			name: "bad type does not echo value",
+			data: strings.Replace(validCatalogYAML, "      memoryMiB: 4096", "      memoryMiB: raw-secret-sentinel", 1),
+			want: "invalid YAML document or unsupported field",
 		},
 	}
 	for _, test := range tests {
@@ -95,7 +115,7 @@ func TestCatalogValidationRejectsUnsafeOrIncompleteValues(t *testing.T) {
 			mutate: func(catalog *Catalog) {
 				catalog.Backups = append(catalog.Backups, catalog.Backups[0])
 			},
-			want: "duplicate id",
+			want: "duplicate backup id",
 		},
 		{
 			name: "missing secret reference",
@@ -140,6 +160,20 @@ func TestCatalogValidationRejectsUnsafeOrIncompleteValues(t *testing.T) {
 			want: "valid S3 bucket",
 		},
 		{
+			name: "bucket label ends with hyphen",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Storage.Bucket = "foo-.bar"
+			},
+			want: "valid S3 bucket",
+		},
+		{
+			name: "bucket label starts with hyphen",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Storage.Bucket = "foo.-bar"
+			},
+			want: "valid S3 bucket",
+		},
+		{
 			name: "invalid selection",
 			mutate: func(catalog *Catalog) {
 				catalog.Backups[0].Selection = Selection{Policy: "id"}
@@ -166,6 +200,20 @@ func TestCatalogValidationRejectsUnsafeOrIncompleteValues(t *testing.T) {
 				catalog.Backups[0].Restore.Image = "--network=host"
 			},
 			want: "runtime command-line option",
+		},
+		{
+			name: "invalid expected-empty table reference",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Validation.ExpectedEmptyTables = []string{"dbo."}
+			},
+			want: "schema.table",
+		},
+		{
+			name: "expected-empty table requires semantic review",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Validation.SemanticReview = false
+			},
+			want: "requires semanticReview",
 		},
 		{
 			name: "unknown cleanup policy",
@@ -200,5 +248,24 @@ func TestCatalogValidationAcceptsExplicitBackupIDAndHTTPSEndpoint(t *testing.T) 
 	catalog.Backups[0].Storage.Endpoint = "https://storage.example.test"
 	if err := catalog.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateProductionRequiresDigestPinnedImages(t *testing.T) {
+	catalog, err := Decode([]byte(validCatalogYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.ValidateProduction(); err == nil || !strings.Contains(err.Error(), "pinned by sha256") {
+		t.Fatalf("ValidateProduction() error = %v, want digest requirement", err)
+	}
+
+	catalog.Backups[0].Restore.Image = "mcr.microsoft.com/mssql/server@sha256:" + strings.Repeat("a", 64)
+	if err := catalog.ValidateProduction(); err != nil {
+		t.Fatalf("ValidateProduction(digest) error = %v", err)
+	}
+	catalog.Backups[0].Restore.Image = "mcr.microsoft.com/mssql/server@sha256:invalid"
+	if err := catalog.ValidateProduction(); err == nil {
+		t.Fatal("ValidateProduction() accepted malformed digest")
 	}
 }

@@ -150,7 +150,7 @@ Catalog generation transforms canonical configuration and generated backup artif
 - Identify backup provider, storage/repository, source database, available backup-selection policy, and supported check profiles.
 - Validate references and report missing/ambiguous configuration before a scheduled run.
 - Avoid copying resolved secret values into inventory.
-- Include stable identifiers and source locations so results can be traced back to configuration.
+- Include stable identifiers and relative source locations so results can be traced back to configuration.
 
 ## 8. Package and executable layout (proposed)
 

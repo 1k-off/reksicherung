@@ -16,3 +16,10 @@ selection is either `latest` or an explicit provider backup ID; cleanup is
 either `delete` or `hold_for_review`. The restore image and runtime limits are
 explicit so a check cannot silently inherit unbounded host resources. Production
 deployments should pin the restore image to a reviewed digest.
+
+Set `validation.semanticReview: true` to offer AI-assisted semantic review in
+the generated Airon inventory. `validation.expectedEmptyTables` is an optional
+list of `schema.table` names; an empty table is still a warning, not a failure.
+`Catalog.ValidateProduction` additionally requires each restore image to use a
+sha256 digest. The local example uses a mutable tag for development and is not
+valid under production validation.

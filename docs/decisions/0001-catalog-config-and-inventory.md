@@ -16,10 +16,17 @@ for loopback development endpoints. The first version supports `latest` and
 explicit backup-ID selection, S3-compatible storage, SQL Server, and either
 `delete` or `hold_for_review` cleanup.
 
+AI semantic review is opt-in per source using `validation.semanticReview`.
+Optional `validation.expectedEmptyTables` annotations are serialized for that
+review and require semantic review to be enabled. Production validation also
+requires a sha256-pinned restore image; development validation allows a mutable
+tag for local and integration use.
+
 Airon receives a separate compact JSON inventory generated from the validated
 catalog. Inventory IDs are sorted for reproducibility. The inventory excludes
 secret references, storage endpoints, and restore settings; Reksicherung
-resolves operational details by stable source ID.
+resolves operational details by stable source ID. Each entry has a stable
+relative `sourceLocation` reference such as `configs/catalog.yaml#backups/app`.
 
 ## Rationale
 
@@ -41,3 +48,6 @@ resolves operational details by stable source ID.
   generator-only options.
 - Production deployments must pin restore images by digest even though
   development and integration examples use the requested `2022-latest` tag.
+- `catalog` inventory generation requires a caller-supplied stable relative
+  source reference; the CLI defaults it to the catalog file's basename to avoid
+  leaking machine-specific absolute paths.
