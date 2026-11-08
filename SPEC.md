@@ -213,20 +213,20 @@ Exact MCP tool names and argument schemas remain to be designed and documented w
 - Use Podman as the initial local container engine.
 - For local development and the first SQL Server integration tests, use `mcr.microsoft.com/mssql/server:2022-latest`.
 
-The runtime interface should avoid coupling restore orchestration to Podman-specific concepts so another container engine can be considered later. Before production use, define image update/provenance policy and whether the SQL Server image should be pinned by digest.
+The runtime interface should avoid coupling restore orchestration to Podman-specific concepts so another container engine can be considered later. Restore containers use no network by default, publish no host ports, and have bounded CPU, memory, and process counts. Before production use, define image update/provenance policy and whether the SQL Server image should be pinned by digest.
 
 ## 11. Secrets and credentials
 
 - Do not store secret values in checked-in YAML, generated GoBackup/Restic configs, inventory, command-line arguments, prompt text, or evidence logs.
 - Configuration stores references to secrets. A separate secrets service/container is the preferred operating model; Reksicherung resolves references at run time through a `SecretProvider` interface.
-- **OpenBao is the leading first-provider candidate**, not yet a final commitment. Keep the interface provider-neutral so another lightweight open-source product can be evaluated without changing workflow/config semantics.
+- **OpenBao is the first secret provider**, using its KV v2 API. Keep the interface provider-neutral so another lightweight open-source product can be evaluated without changing workflow/config semantics.
 - Do not use SOPS for this design.
 - Do not treat Consul or another service-discovery product as a secret manager without separately validating its secret access controls, lifecycle, and operational suitability.
 - Use least-privilege service identities and retrieve only the references needed for the current run.
 - Keep secret values out of logs and tool outputs. If an error includes a credential-bearing value, redact it before recording.
 - Determine how the secrets service is bootstrapped, authenticated, backed up, and operated as part of the OpenBao proof of concept. “Easy to run” is a requirement, not an assumption.
 
-The reference syntax, authentication mechanism, secret rotation model, and whether the secrets service is a local or shared service are open decisions.
+The initial reference syntax is `openbao://<mount>/<path>#<key>`. The local test setup uses an ephemeral OpenBao dev container and dummy values only. Production authentication, secret rotation, and whether OpenBao is deployed locally or shared remain operational decisions.
 
 ## 12. Checks and result semantics
 
