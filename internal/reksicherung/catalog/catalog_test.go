@@ -102,6 +102,7 @@ kind: BackupCatalog
 backups:
   - id: source
     provider: restic
+    repositoryPasswordRef: openbao://secret/reksicherung/restic#repository-password
     backupName: production
     database:
       type: sqlserver

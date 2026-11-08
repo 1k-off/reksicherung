@@ -8,7 +8,10 @@ Reksicherung configuration is a strict single-document YAML catalog using
 `apiVersion: reksicherung.io/v1alpha1` and `kind: BackupCatalog`. Each catalog
 entry describes a SQL Server backup source, a GoBackup or Restic provider, S3
 repository coordinates, OpenBao credential references, backup selection, a
-bounded restore image/resources/timeout, and cleanup policy.
+bounded restore image/resources/timeout, and cleanup policy. Restic sources
+require a `repositoryPasswordRef` secret reference; GoBackup sources reject
+this provider-specific field. The reference identifies the Restic repository
+password only and does not affect repository URL derivation.
 
 Catalog decoding rejects unknown fields and duplicate source IDs. Secret fields
 are references only. Remote S3 endpoints must use HTTPS; HTTP is allowed only

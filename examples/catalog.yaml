@@ -2,7 +2,8 @@ apiVersion: reksicherung.io/v1alpha1
 kind: BackupCatalog
 backups:
   - id: example-production
-    provider: gobackup
+    provider: restic
+    repositoryPasswordRef: openbao://secret/reksicherung/restic#repository-password
     backupName: example-production
     database:
       type: sqlserver

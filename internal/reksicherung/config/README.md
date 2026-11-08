@@ -8,8 +8,16 @@ example.
 
 Each source describes one SQL Server backup, a GoBackup or Restic adapter, an
 S3-compatible repository, and the policy and bounded resources for a restore
-check. Secret fields are references only and are validated without resolving
-them. Literal credential keys are rejected as unknown YAML fields.
+check. Restic sources require `repositoryPasswordRef`; GoBackup sources reject
+that field. It is the OpenBao secret reference for the Restic repository
+password, not a password value or a repository URL. Secret fields are
+references only and are validated without resolving them. Literal credential
+keys are rejected as unknown YAML fields.
+
+`repositoryPasswordRef` is operational configuration and is never copied into
+the Airon inventory. This catalog field does not derive or alter the Restic
+repository URL; repository coordinates remain represented by the existing
+S3 storage fields.
 
 Current limits are deliberate: only SQL Server and S3 are supported; backup
 selection is either `latest` or an explicit provider backup ID; cleanup is

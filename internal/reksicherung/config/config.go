@@ -32,15 +32,16 @@ type Catalog struct {
 
 // BackupSource describes one independently restorable SQL Server backup.
 type BackupSource struct {
-	ID         string            `yaml:"id"`
-	Provider   string            `yaml:"provider"`
-	BackupName string            `yaml:"backupName"`
-	Database   Database          `yaml:"database"`
-	Storage    S3Storage         `yaml:"storage"`
-	Selection  Selection         `yaml:"selection"`
-	Restore    Restore           `yaml:"restore"`
-	Validation ValidationProfile `yaml:"validation,omitempty"`
-	Cleanup    string            `yaml:"cleanup"`
+	ID                    string            `yaml:"id"`
+	Provider              string            `yaml:"provider"`
+	RepositoryPasswordRef string            `yaml:"repositoryPasswordRef,omitempty"`
+	BackupName            string            `yaml:"backupName"`
+	Database              Database          `yaml:"database"`
+	Storage               S3Storage         `yaml:"storage"`
+	Selection             Selection         `yaml:"selection"`
+	Restore               Restore           `yaml:"restore"`
+	Validation            ValidationProfile `yaml:"validation,omitempty"`
+	Cleanup               string            `yaml:"cleanup"`
 }
 
 type Database struct {
@@ -157,6 +158,13 @@ func (backup BackupSource) validate() error {
 	}
 	if backup.Provider != "gobackup" && backup.Provider != "restic" {
 		return errors.New("provider must be gobackup or restic")
+	}
+	if backup.Provider == "restic" {
+		if _, err := secrets.ParseReference(backup.RepositoryPasswordRef); err != nil {
+			return errors.New("repositoryPasswordRef must be a valid secret reference for Restic")
+		}
+	} else if backup.RepositoryPasswordRef != "" {
+		return errors.New("repositoryPasswordRef is only valid for Restic")
 	}
 	if !validName(backup.BackupName) {
 		return errors.New("backupName must be a non-empty printable name of at most 256 characters")

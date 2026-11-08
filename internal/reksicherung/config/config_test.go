@@ -59,8 +59,12 @@ func TestDecodeRepositoryExampleCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(example) error = %v", err)
 	}
-	if _, err := Decode(data); err != nil {
+	catalog, err := Decode(data)
+	if err != nil {
 		t.Fatalf("Decode(example) error = %v", err)
+	}
+	if got := catalog.Backups[0].RepositoryPasswordRef; got != "openbao://secret/reksicherung/restic#repository-password" {
+		t.Fatalf("example repositoryPasswordRef = %q", got)
 	}
 }
 
@@ -148,6 +152,28 @@ func TestCatalogValidationRejectsUnsafeOrIncompleteValues(t *testing.T) {
 				catalog.Backups[0].Storage.Credentials.SecretKeyRef = "not-a-secret-reference"
 			},
 			want: "secretKeyRef",
+		},
+		{
+			name: "Restic requires repository password reference",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Provider = "restic"
+			},
+			want: "repositoryPasswordRef",
+		},
+		{
+			name: "Restic repository password must be a reference",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].Provider = "restic"
+				catalog.Backups[0].RepositoryPasswordRef = "plaintext-secret"
+			},
+			want: "repositoryPasswordRef",
+		},
+		{
+			name: "GoBackup rejects repository password reference",
+			mutate: func(catalog *Catalog) {
+				catalog.Backups[0].RepositoryPasswordRef = "openbao://secret/reksicherung/restic#repository-password"
+			},
+			want: "only valid for Restic",
 		},
 		{
 			name: "remote insecure storage endpoint",
