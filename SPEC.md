@@ -126,7 +126,7 @@ Use a versioned, human-maintainable YAML configuration as the source of truth. I
 - Cleanup mode: normal cleanup or `hold_for_review`.
 - Evidence output/retention settings.
 
-The exact YAML schema and versioning policy are open design items; examples in this document are illustrative, not a frozen API. Prompt instructions can define per-project selection and ordering policy, but the normalized run plan (scope, required coverage, ordering/concurrency, and failure behavior) is recorded and validated rather than being left as unstructured prose at execution time.
+The first catalog schema is versioned as `reksicherung.io/v1alpha1` with `kind: BackupCatalog`. It currently supports SQL Server sources using GoBackup or Restic, S3-compatible storage, OpenBao secret references, `latest` or explicit backup-ID selection, bounded restore resources/timeouts, and `delete` or `hold_for_review` cleanup. The Airon inventory is a separate deterministic JSON projection that omits secret references, endpoints, and restore settings. See `docs/decisions/0001-catalog-config-and-inventory.md`; the schema remains subject to evolution before a stable `v1` release. Prompt instructions can define per-project selection and ordering policy, but the normalized run plan is recorded and validated rather than being left as unstructured prose at execution time.
 
 ### GoBackup generator
 
@@ -320,10 +320,11 @@ The initial design does not require cryptographic evidence signing or encrypted 
 - Empty tables are warnings, not automatic failures; per-database annotations for tables expected to be empty are optional.
 - Retry only bounded transient/idempotent operations by default; do not automatically replay an entire restore and AI-check run.
 - Keep Airon JSON and Reksicherung evidence correlated by run ID. No tamper-proofing or encrypted ephemeral disk requirement.
+- The initial `BackupCatalog` schema and secret-free Airon inventory are described in `docs/decisions/0001-catalog-config-and-inventory.md`.
 
 ## 18. Open decisions before implementation
 
-- Final canonical YAML schema and version-compatibility policy.
+- Stable `v1` YAML schema and migration policy beyond the initial `v1alpha1` catalog.
 - Run-registry storage choice, lease/expiry policy, and reconciliation interval for abandoned temporary environments.
 - OpenBao operational model and proof of concept: deployment footprint, initialization/unseal, authentication, persistence, backup, and recovery.
 - Secret-reference syntax and credential renewal/rotation behavior.

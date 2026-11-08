@@ -1,0 +1,27 @@
+apiVersion: reksicherung.io/v1alpha1
+kind: BackupCatalog
+backups:
+  - id: example-production
+    provider: gobackup
+    backupName: example-production
+    database:
+      type: sqlserver
+      name: Example
+    storage:
+      # Omit endpoint to use the provider's AWS S3 endpoint.
+      endpoint: https://minio.example.test
+      bucket: backup-data
+      region: eu-central
+      prefix: example/production
+      credentials:
+        accessKeyRef: openbao://secret/reksicherung/s3#access-key
+        secretKeyRef: openbao://secret/reksicherung/s3#secret-key
+    selection:
+      policy: latest
+    restore:
+      # Pin this to a reviewed image digest before production deployment.
+      image: mcr.microsoft.com/mssql/server:2022-latest
+      cpuMilli: 2000
+      memoryMiB: 4096
+      timeout: 2h
+    cleanup: delete
