@@ -114,6 +114,28 @@ func TestCoordinatorWithholdsRunnerErrorDetails(t *testing.T) {
 	}
 }
 
+func TestCoordinatorWithholdsInvalidRunnerResultDetails(t *testing.T) {
+	const secret = "sensitive/check-id-sentinel"
+	result, err := (Coordinator{
+		Runner: runnerFunc(func(context.Context, string) ([]CheckResult, error) {
+			return []CheckResult{{ID: secret, Status: CheckPassed}}, nil
+		}),
+	}).Run(context.Background(), testPlan([]string{"db-a"}, plan.Sequential, 1, plan.Continue), testInventory("db-a"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	outcome := result.Outcomes[0]
+	if len(outcome.Checks) != 0 {
+		t.Errorf("invalid runner checks were returned: %+v", outcome.Checks)
+	}
+	if strings.Contains(outcome.Error, secret) {
+		t.Errorf("outcome error leaked runner detail: %q", outcome.Error)
+	}
+	if result.Evaluation.Verdict != VerdictFail {
+		t.Errorf("verdict = %q, want %q", result.Evaluation.Verdict, VerdictFail)
+	}
+}
+
 func TestCoordinatorNormalizesAndOrdersResults(t *testing.T) {
 	runner := runnerFunc(func(_ context.Context, _ string) ([]CheckResult, error) {
 		return []CheckResult{

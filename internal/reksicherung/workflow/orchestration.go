@@ -176,11 +176,8 @@ func makeOutcome(id string, required []string, checks []CheckResult, runErr erro
 	orderedChecks := append([]CheckResult(nil), checks...)
 	sort.SliceStable(orderedChecks, func(i, j int) bool { return orderedChecks[i].ID < orderedChecks[j].ID })
 
-	outcome := DatabaseOutcome{ID: id, Checks: orderedChecks}
+	outcome := DatabaseOutcome{ID: id}
 	evaluation, evaluationErr := Evaluate(orderedChecks, required)
-	if evaluationErr == nil {
-		outcome.Evaluation = evaluation
-	}
 	if runErr != nil {
 		if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 			outcome.State = OutcomeCanceled
@@ -196,10 +193,12 @@ func makeOutcome(id string, required []string, checks []CheckResult, runErr erro
 
 	if evaluationErr != nil {
 		outcome.State = OutcomeFailed
-		outcome.Error = fmt.Sprintf("invalid runner results: %v", evaluationErr)
+		outcome.Error = "database runner returned invalid check results; details were withheld"
 		outcome.Reason = "database runner returned invalid check results"
 		return outcome
 	}
+	outcome.Checks = orderedChecks
+	outcome.Evaluation = evaluation
 	switch evaluation.Verdict {
 	case VerdictPass:
 		outcome.State = OutcomePassed
