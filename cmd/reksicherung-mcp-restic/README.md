@@ -33,28 +33,46 @@ supports them. A read-only UI does not replace backend access controls.
 
 ## Configure
 
-The executable reads these process environment variables:
+Required process configuration:
 
 - `REKSICHERUNG_RESTIC_REPOSITORY`: the single Restic repository URL/path.
-- `REKSICHERUNG_RESTIC_PASSWORD`: the repository password.
+- `REKSICHERUNG_RESTIC_PASSWORD_REF`: an OpenBao reference such as
+  `openbao://secret/reksicherung/restic#repository-password`.
+- `REKSICHERUNG_OPENBAO_ADDR`: the OpenBao base URL. HTTPS is required except
+  for loopback endpoints used in local development.
+- `REKSICHERUNG_OPENBAO_TOKEN`: the protected OpenBao bootstrap token. This is
+  the only secret value supplied directly through the process environment.
 
-For supported remote backends, the process may also receive explicit backend
-credentials: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
-`AWS_DEFAULT_REGION`, `AWS_REGION`, `B2_ACCOUNT_ID`, `B2_ACCOUNT_KEY`,
-`AZURE_ACCOUNT_NAME`, or `AZURE_ACCOUNT_KEY`. Only those allowlisted variables
-are passed to the Restic child process, alongside `RESTIC_REPOSITORY` and
-`RESTIC_PASSWORD`; the rest of the parent environment is not inherited.
-Variables such as `RESTIC_PASSWORD_COMMAND` are intentionally not supported.
+Optional remote backend credentials are configured only as OpenBao references:
 
-The server currently accepts secrets only through its protected process
-environment. It does not resolve provider-neutral/OpenBao references: this
-standalone process has no configured secret-provider lifecycle or token
-renewal/cleanup contract. Supply values through Airon's protected environment
-or another secret manager's process-injection mechanism. Do not place literal
-secrets in checked-in configuration. Environment variables can be visible to
-other processes running under the same OS account, so use a dedicated account
-and restrict process inspection access. No credentials or tool inputs are
-logged.
+| Restic child variable | Reference environment variable |
+| --- | --- |
+| `AWS_ACCESS_KEY_ID` | `REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF` |
+| `AWS_SECRET_ACCESS_KEY` | `REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF` |
+| `AWS_SESSION_TOKEN` | `REKSICHERUNG_RESTIC_AWS_SESSION_TOKEN_REF` |
+| `B2_ACCOUNT_ID` | `REKSICHERUNG_RESTIC_B2_ACCOUNT_ID_REF` |
+| `B2_ACCOUNT_KEY` | `REKSICHERUNG_RESTIC_B2_ACCOUNT_KEY_REF` |
+| `AZURE_ACCOUNT_NAME` | `REKSICHERUNG_RESTIC_AZURE_ACCOUNT_NAME_REF` |
+| `AZURE_ACCOUNT_KEY` | `REKSICHERUNG_RESTIC_AZURE_ACCOUNT_KEY_REF` |
+
+Each configured reference must use `openbao://<mount>/<path>#<key>`. AWS
+`AWS_DEFAULT_REGION` and `AWS_REGION` remain optional non-secret configuration
+and are passed through explicitly. The repository string, OpenBao address,
+secret references, and AWS region are configuration rather than credential
+values (the repository and address can still be operationally sensitive); no
+other parent environment variables are inherited or forwarded. The server
+rejects repository URLs with embedded password userinfo or query parameters
+named like credentials, as well as password-form SFTP userinfo, while allowing
+standard local, SFTP, S3, B2, and Azure repository forms.
+
+The server resolves references once at startup through `secrets.SecretProvider`
+and the OpenBao KV v2 provider. Resolved values are passed only to the Restic
+child process and are never included in diagnostics. OpenBao token renewal is
+not performed; provision a token valid for the process lifetime. Environment
+variables can be visible to other processes running under the same OS account,
+so use a dedicated account and restrict process inspection access. Do not put
+secret values in repository URLs, checked-in configuration, or reference
+environment variables.
 
 Build with the module's Go 1.23-compatible toolchain:
 
@@ -65,9 +83,9 @@ go build -o ./bin/reksicherung-mcp-restic ./cmd/reksicherung-mcp-restic
 ## Airon stdio example
 
 Airon expands `${NAME}` placeholders before starting MCP children. Configure
-the values in Airon's protected environment, disable inherited environment
-passing, and keep prompt-input logging disabled because snapshot IDs and
-hostnames can be operationally sensitive.
+the OpenBao bootstrap token in Airon's protected environment, disable inherited
+environment passing, and keep prompt-input logging disabled because snapshot
+IDs and hostnames can be operationally sensitive.
 
 ```yaml
 runtime:
@@ -80,9 +98,11 @@ mcp_servers:
     env_passthrough: false
     env:
       REKSICHERUNG_RESTIC_REPOSITORY: ${REKSICHERUNG_RESTIC_REPOSITORY}
-      REKSICHERUNG_RESTIC_PASSWORD: ${REKSICHERUNG_RESTIC_PASSWORD}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      REKSICHERUNG_RESTIC_PASSWORD_REF: ${REKSICHERUNG_RESTIC_PASSWORD_REF}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF: ${REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF}
+      REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF: ${REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
 
 prompts:

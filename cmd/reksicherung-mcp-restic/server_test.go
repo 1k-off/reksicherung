@@ -17,30 +17,6 @@ import (
 
 const testSnapshotID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
-func TestLoadConfigRequiresCredentialsAndPassesOnlySupportedBackendEnvironment(t *testing.T) {
-	values := map[string]string{
-		repositoryEnv:             "s3:s3.example.invalid/archive",
-		passwordEnv:               "secret",
-		"AWS_ACCESS_KEY_ID":       "access",
-		"HOME":                    "must-not-be-passed",
-		"RESTIC_PASSWORD_COMMAND": "must-not-be-passed",
-	}
-	config, err := loadConfig(func(name string) string { return values[name] })
-	if err != nil {
-		t.Fatalf("loadConfig() error = %v", err)
-	}
-	if config.repository != values[repositoryEnv] || config.password != values[passwordEnv] {
-		t.Fatalf("config did not retain configured process inputs")
-	}
-	if !reflect.DeepEqual(config.environment, []string{"AWS_ACCESS_KEY_ID=access"}) {
-		t.Fatalf("backend environment = %q, want only allowlisted credentials", config.environment)
-	}
-
-	if _, err := loadConfig(func(string) string { return "" }); err == nil {
-		t.Fatal("loadConfig() succeeded without required inputs")
-	}
-}
-
 func TestMCPRegistersOnlyBoundedReadOnlySnapshotTools(t *testing.T) {
 	fake := &fakeSnapshotService{
 		list: resticservice.SnapshotList{
