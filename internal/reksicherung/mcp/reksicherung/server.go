@@ -94,7 +94,7 @@ type planWire struct {
 }
 
 type selectionWire struct {
-	All         bool     `json:"all"`
+	All         *bool    `json:"all"`
 	DatabaseIDs []string `json:"database_ids,omitempty"`
 }
 
@@ -115,14 +115,19 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 	if err := decodeStrict(raw.Plan, &requested); err != nil {
 		return errors.New("invalid restore-check request")
 	}
-	if len(requested.Selection.DatabaseIDs) > maxSelectedDBs ||
+	if requested.Selection.All == nil ||
+		len(requested.Selection.DatabaseIDs) > maxSelectedDBs ||
 		(raw.AironRunID != "" && !validIdentifier(raw.AironRunID)) {
+		return errors.New("invalid restore-check request")
+	}
+	if *requested.Selection.All && len(requested.Selection.DatabaseIDs) != 0 ||
+		!*requested.Selection.All && len(requested.Selection.DatabaseIDs) == 0 {
 		return errors.New("invalid restore-check request")
 	}
 
 	normalizedPlan := plan.RunPlan{
 		Selection: plan.Selection{
-			All:         requested.Selection.All,
+			All:         *requested.Selection.All,
 			DatabaseIDs: append([]string(nil), requested.Selection.DatabaseIDs...),
 		},
 		Ordering:       requested.Ordering,
@@ -185,14 +190,13 @@ func NewServer(service Service) *mcp.Server {
 								"database_ids":{
 									"type":"array",
 									"items":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$","maxLength":128},
-									"minItems":1,
 									"maxItems":64
 								}
 							},
 							"required":["all"],
 							"oneOf":[
 								{"properties":{"all":{"const":true},"database_ids":{"maxItems":0}}},
-								{"properties":{"all":{"const":false}},"required":["database_ids"]}
+								{"properties":{"all":{"const":false},"database_ids":{"minItems":1}},"required":["database_ids"]}
 							],
 							"additionalProperties":false
 						},

@@ -120,6 +120,36 @@ func TestRestoreCheckUsesAironRunIDMetadata(t *testing.T) {
 	}
 }
 
+func TestRestoreCheckSchemaAndDecoderAgreeOnAllSelection(t *testing.T) {
+	service := &fakeService{result: ServiceResult{
+		RunID: "run-123",
+		Databases: []DatabaseResult{{
+			DatabaseID: "db-1",
+			Status:     workflow.OutcomePassed,
+			Checks:     []CheckResult{{ID: "restore", Status: workflow.CheckPassed, Required: true}},
+		}},
+		Verdict: workflow.VerdictPass,
+	}}
+	client, cleanup := connectTestClient(t, service)
+	defer cleanup()
+
+	args := map[string]any{
+		"plan": map[string]any{
+			"selection": map[string]any{"all": true, "database_ids": []string{}},
+			"ordering":  "any", "max_parallelism": 1, "error_handling": "continue",
+		},
+	}
+	result := callTool(t, client, args)
+	if result.IsError {
+		t.Fatalf("all-selection restore_check failed: %#v", result.Content)
+	}
+	service.mu.Lock()
+	defer service.mu.Unlock()
+	if !service.request.Plan.Selection.All || len(service.request.Plan.Selection.DatabaseIDs) != 0 {
+		t.Fatalf("service received selection %#v, want all=true and no explicit IDs", service.request.Plan.Selection)
+	}
+}
+
 func TestRestoreCheckRejectsConflictingAironRunIDMetadata(t *testing.T) {
 	service := &fakeService{result: ServiceResult{RunID: "run-123"}}
 	client, cleanup := connectTestClient(t, service)
@@ -174,6 +204,27 @@ func TestRestoreCheckRejectsMalformedUnknownAndOversizedInput(t *testing.T) {
 					"all": false, "database_ids": []string{"db-1"}, "database_name": "unknown-field-value-sentinel",
 				},
 				"ordering": "sequential", "max_parallelism": 1, "error_handling": "continue",
+			}},
+		},
+		{
+			name: "missing all-selection discriminator",
+			args: map[string]any{"plan": map[string]any{
+				"selection": map[string]any{"database_ids": []string{"db-1"}},
+				"ordering":  "sequential", "max_parallelism": 1, "error_handling": "continue",
+			}},
+		},
+		{
+			name: "all selection with explicit IDs",
+			args: map[string]any{"plan": map[string]any{
+				"selection": map[string]any{"all": true, "database_ids": []string{"db-1"}},
+				"ordering":  "any", "max_parallelism": 1, "error_handling": "continue",
+			}},
+		},
+		{
+			name: "explicit selection without IDs",
+			args: map[string]any{"plan": map[string]any{
+				"selection": map[string]any{"all": false, "database_ids": []string{}},
+				"ordering":  "any", "max_parallelism": 1, "error_handling": "continue",
 			}},
 		},
 		{
