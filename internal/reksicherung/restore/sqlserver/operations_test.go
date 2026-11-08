@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -17,8 +18,10 @@ const testPassword = "test-secret-password"
 
 type fakeRuntime struct {
 	command      []string
+	commands     [][]string
 	target       container.Container
 	environment  []container.EnvironmentVariable
+	environments [][]container.EnvironmentVariable
 	ctx          context.Context
 	output       []byte
 	err          error
@@ -33,8 +36,10 @@ type fakeRuntime struct {
 func (runtime *fakeRuntime) ExecWithEnvironment(ctx context.Context, target container.Container, command []string, environment []container.EnvironmentVariable) ([]byte, error) {
 	runtime.calls++
 	runtime.command = append([]string(nil), command...)
+	runtime.commands = append(runtime.commands, append([]string(nil), command...))
 	runtime.target = target
 	runtime.environment = append([]container.EnvironmentVariable(nil), environment...)
+	runtime.environments = append(runtime.environments, append([]container.EnvironmentVariable(nil), environment...))
 	runtime.ctx = ctx
 	if runtime.exec != nil {
 		return runtime.exec(ctx)
@@ -270,6 +275,9 @@ func TestRestoreBackupTransfersToFixedPathAndMovesEveryFile(t *testing.T) {
 	runtime := &fakeRuntime{}
 	runtime.exec = func(context.Context) ([]byte, error) {
 		if runtime.calls == 1 {
+			return []byte(backupHeaderRow(1, 1) + "\n"), nil
+		}
+		if runtime.calls == 2 {
 			return []byte(backupFileListRow("primary", "D") + "\n" +
 				backupFileListRow("secondary", "D") + "\n" +
 				backupFileListRow("transaction-log", "L") + "\n"), nil
@@ -284,13 +292,27 @@ func TestRestoreBackupTransfersToFixedPathAndMovesEveryFile(t *testing.T) {
 	if runtime.transferName != nativeBackupName || runtime.transferMax != maxNativeBackupBytes {
 		t.Fatalf("Transfer(name, max) = (%q, %d), want fixed artifact and bounded size", runtime.transferName, runtime.transferMax)
 	}
-	if runtime.calls != 2 {
-		t.Fatalf("ExecWithEnvironment() calls = %d, want FILELISTONLY and RESTORE", runtime.calls)
+	if runtime.calls != 4 {
+		t.Fatalf("ExecWithEnvironment() calls = %d, want HEADERONLY, FILELISTONLY, RESTORE, and cleanup", runtime.calls)
 	}
 	assertSQLCMDInvocation(t, runtime)
-	restoreQuery := runtime.command[len(runtime.command)-1]
+	headerQuery := runtime.commands[0][len(runtime.commands[0])-1]
+	if !strings.HasPrefix(headerQuery, "RESTORE HEADERONLY FROM DISK = ") {
+		t.Fatalf("first SQL command = %q, want HEADERONLY", headerQuery)
+	}
+	fileListQuery := runtime.commands[1][len(runtime.commands[1])-1]
+	if !strings.Contains(fileListQuery, "RESTORE FILELISTONLY") || !strings.Contains(fileListQuery, "WITH FILE = 1") {
+		t.Fatalf("second SQL command = %q, want FILELISTONLY for the validated first backup set", fileListQuery)
+	}
+	restoreQuery := runtime.commands[2][len(runtime.commands[2])-1]
 	if !strings.HasPrefix(restoreQuery, "RESTORE DATABASE ["+operations.database+"] FROM DISK = N'"+nativeBackupPath+"'") {
 		t.Fatalf("restore query is not bound to the run database and fixed backup: %q", restoreQuery)
+	}
+	if !strings.Contains(restoreQuery, "WITH FILE = 1") {
+		t.Fatalf("restore query does not use the validated first backup set: %q", restoreQuery)
+	}
+	if !reflect.DeepEqual(runtime.commands[3], []string{"rm", "-f", "--", nativeBackupPath}) {
+		t.Fatalf("backup cleanup command = %#v", runtime.commands[3])
 	}
 	expectedMoves := []string{
 		"MOVE N'primary' TO N'/var/opt/mssql/data/" + operations.database + "_data_001.mdf'",
@@ -363,6 +385,73 @@ func TestParseBackupFileListRejectsFileCountAndOutputOverflow(t *testing.T) {
 	}
 }
 
+func TestValidateSingleFullBackupSetRejectsAmbiguousOrUnsupportedHeaders(t *testing.T) {
+	valid := backupHeaderRow(1, 1)
+	tests := map[string]string{
+		"valid full backup":     valid + "\n",
+		"wrong column count":    "1|1\n",
+		"non-first position":    backupHeaderRow(2, 1) + "\n",
+		"not a database backup": backupHeaderRow(1, 2) + "\n",
+		"multiple backup sets":  valid + "\n" + backupHeaderRow(2, 1) + "\n",
+		"delimiter in metadata": strings.Replace(valid, "1|", "name|with|delimiter|", 1) + "\n",
+	}
+	for name, output := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := validateSingleFullBackupSet([]byte(output))
+			if name == "valid full backup" {
+				if err != nil {
+					t.Fatalf("validateSingleFullBackupSet() error = %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrInvalidBackupMetadata) {
+				t.Fatalf("validateSingleFullBackupSet() error = %v, want ErrInvalidBackupMetadata", err)
+			}
+		})
+	}
+}
+
+func TestRestoreBackupRejectsMultipleSetsAndAlwaysRemovesStagedArtifact(t *testing.T) {
+	runtime := &fakeRuntime{}
+	runtime.exec = func(context.Context) ([]byte, error) {
+		if runtime.command[0] == sqlcmdPath {
+			return []byte(backupHeaderRow(1, 1) + "\n" + backupHeaderRow(2, 1) + "\n"), nil
+		}
+		return nil, nil
+	}
+	operations := newTestOperations(t, runtime)
+	err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+	if !errors.Is(err, ErrInvalidBackupMetadata) {
+		t.Fatalf("RestoreBackup() error = %v, want ErrInvalidBackupMetadata", err)
+	}
+	if runtime.calls != 2 || !reflect.DeepEqual(runtime.commands[1], []string{"rm", "-f", "--", nativeBackupPath}) {
+		t.Fatalf("commands = %#v, want HEADERONLY and staged-artifact cleanup", runtime.commands)
+	}
+}
+
+func TestRestoreBackupReportsStagedArtifactCleanupFailure(t *testing.T) {
+	runtime := &fakeRuntime{}
+	runtime.exec = func(context.Context) ([]byte, error) {
+		if runtime.command[0] == "rm" {
+			return nil, errors.New("cleanup detail is intentionally hidden")
+		}
+		switch runtime.calls {
+		case 1:
+			return []byte(backupHeaderRow(1, 1) + "\n"), nil
+		case 2:
+			return []byte(backupFileListRow("primary", "D") + "\n" +
+				backupFileListRow("log", "L") + "\n"), nil
+		default:
+			return nil, nil
+		}
+	}
+	operations := newTestOperations(t, runtime)
+	err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
+	if !errors.Is(err, ErrBackupCleanupFailed) || strings.Contains(err.Error(), "cleanup detail") {
+		t.Fatalf("RestoreBackup() error = %v, want sanitized cleanup error", err)
+	}
+}
+
 func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
 	t.Run("transfer failure", func(t *testing.T) {
 		runtime := &fakeRuntime{transferErr: errors.New("transfer leaked " + testPassword)}
@@ -372,7 +461,7 @@ func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
 			t.Fatalf("RestoreBackup() error = %v, want sanitized transfer failure", err)
 		}
 		if runtime.calls != 0 {
-			t.Fatalf("sqlcmd calls = %d after transfer failure, want 0", runtime.calls)
+			t.Fatalf("commands = %d after transfer failure, want 0", runtime.calls)
 		}
 	})
 	t.Run("sqlcmd failure", func(t *testing.T) {
@@ -385,7 +474,13 @@ func TestRestoreBackupSanitizesTransferAndCommandErrors(t *testing.T) {
 		}
 	})
 	t.Run("FILELISTONLY output overflow", func(t *testing.T) {
-		runtime := &fakeRuntime{output: bytes.Repeat([]byte("x"), maxOutputBytes+1)}
+		runtime := &fakeRuntime{}
+		runtime.exec = func(context.Context) ([]byte, error) {
+			if runtime.calls == 1 {
+				return []byte(backupHeaderRow(1, 1) + "\n"), nil
+			}
+			return bytes.Repeat([]byte("x"), maxOutputBytes+1), nil
+		}
 		operations := newTestOperations(t, runtime)
 		err := operations.RestoreBackup(context.Background(), io.NopCloser(strings.NewReader("backup")))
 		if !errors.Is(err, ErrOutputLimit) {
@@ -406,6 +501,9 @@ func TestRestoreBackupHonorsTimeoutAndCancellation(t *testing.T) {
 			runtime := &fakeRuntime{}
 			started := make(chan struct{})
 			runtime.exec = func(ctx context.Context) ([]byte, error) {
+				if len(runtime.command) == 0 || runtime.command[0] != sqlcmdPath {
+					return nil, nil
+				}
 				close(started)
 				<-ctx.Done()
 				return nil, ctx.Err()
@@ -449,19 +547,35 @@ func backupFileListRow(logicalName, fileType string) string {
 	return strings.Join(columns, "|")
 }
 
+func backupHeaderRow(position, backupType int) string {
+	columns := make([]string, headerOnlyColumns)
+	columns[2] = fmt.Sprint(backupType)
+	columns[5] = fmt.Sprint(position)
+	return strings.Join(columns, "|")
+}
+
 func assertSQLCMDInvocation(t *testing.T, runtime *fakeRuntime) {
 	t.Helper()
-	if len(runtime.command) < 2 || runtime.command[0] != sqlcmdPath {
-		t.Fatalf("command = %#v, want sqlcmd at %s", runtime.command, sqlcmdPath)
+	found := false
+	for index, command := range runtime.commands {
+		if len(command) == 0 || command[0] != sqlcmdPath {
+			continue
+		}
+		found = true
+		if !containsArgSequence(command, "-b", "-C", "-S", "localhost", "-U", "sa", "-d", "master") ||
+			!containsArgSequence(command, "-Q") {
+			t.Fatalf("command does not contain fixed SQLCMD options: %#v", command)
+		}
+		if len(runtime.environments[index]) != 1 || runtime.environments[index][0].Name != "SQLCMDPASSWORD" ||
+			runtime.environments[index][0].Value != testPassword {
+			t.Fatalf("SQLCMD environment = %#v, want only SQLCMDPASSWORD", runtime.environments[index])
+		}
 	}
-	if !containsArgSequence(runtime.command, "-b", "-C", "-S", "localhost", "-U", "sa", "-d", "master", "-Q") {
-		t.Fatalf("command does not contain fixed SQLCMD options: %#v", runtime.command)
+	if !found {
+		t.Fatalf("commands = %#v, want at least one sqlcmd call", runtime.commands)
 	}
 	if runtime.target != testContainer() {
 		t.Fatalf("target = %#v, want managed target", runtime.target)
-	}
-	if len(runtime.environment) != 1 || runtime.environment[0].Name != "SQLCMDPASSWORD" {
-		t.Fatalf("environment = %#v, want SQLCMDPASSWORD", runtime.environment)
 	}
 }
 

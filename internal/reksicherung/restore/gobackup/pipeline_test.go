@@ -90,8 +90,12 @@ func TestPipelineOrdersRestoreAndUsesBoundedRunResources(t *testing.T) {
 			t.Errorf("container creation evidence lacks resource identifier: %#v", event)
 		}
 		if event.Operation == "dbcc_checkdb" && event.Status == evidence.StatusSucceeded &&
-			event.Metadata["outcome"] != "command_completed" {
+			(event.Metadata["outcome"] != "command_completed" || event.Metadata["database"] != database) {
 			t.Errorf("DBCC event does not describe command completion only: %#v", event)
+		}
+		if event.Operation == "cleanup" && event.Status == evidence.StatusSucceeded &&
+			event.Metadata["cleanup_mode"] != "delete" {
+			t.Errorf("cleanup evidence lacks requested mode: %#v", event)
 		}
 	}
 	encoded, err := json.Marshal(evidenceSink.events)
@@ -129,7 +133,8 @@ func TestPipelineExplicitSelectionAndRetainedMode(t *testing.T) {
 	}
 	last := evidenceSink.events[len(evidenceSink.events)-1]
 	if last.Operation != "cleanup" || last.Status != evidence.StatusSkipped ||
-		last.Metadata["outcome"] != "retained" || last.Metadata["resource_id"] != "container-id" {
+		last.Metadata["outcome"] != "retained" || last.Metadata["resource_id"] != "container-id" ||
+		last.Metadata["cleanup_mode"] != "hold_for_review" {
 		t.Fatalf("retained cleanup evidence = %#v", last)
 	}
 	if runtime.removeCalls != 0 {
@@ -313,6 +318,34 @@ func TestPipelineCleanupStillRunsWhenCleanupEvidenceAppendFails(t *testing.T) {
 	}
 }
 
+func TestPipelineEvidenceAppendRespectsRestoreTimeoutAndStillCleansUp(t *testing.T) {
+	var events []string
+	runtime := &pipelineTestRuntime{events: &events}
+	repository := &pipelineTestRepository{events: &events, selected: backupstore.Backup{ID: "nightly.tar"}}
+	pipeline := newPipelineTest(t, runtime, repository, &pipelineTestImporter{events: &events}, &pipelineTestOperations{events: &events})
+	request := pipelineTestRequest("latest", "")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	request.EvidenceSink = &blockingPipelineEvidence{
+		runID:     pipelineTestRunID,
+		operation: "container_creation",
+		status:    evidence.StatusSucceeded,
+		cancel:    cancel,
+	}
+
+	started := time.Now()
+	_, err := pipeline.Restore(ctx, request)
+	if !errors.Is(err, ErrEvidenceAppend) {
+		t.Fatalf("Restore() error = %v, want ErrEvidenceAppend", err)
+	}
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("Restore() exceeded bounded test duration: %s", elapsed)
+	}
+	if runtime.removeCalls != 1 {
+		t.Fatalf("cleanup calls = %d, want 1 after evidence timeout", runtime.removeCalls)
+	}
+}
+
 func TestPipelineRecordsSanitizedFailureAndCleanupFailure(t *testing.T) {
 	var events []string
 	sink := &pipelineTestEvidence{runID: pipelineTestRunID}
@@ -344,8 +377,13 @@ func TestPipelineRecordsSanitizedFailureAndCleanupFailure(t *testing.T) {
 		t.Fatalf("failure evidence leaked runtime details: %s", encoded)
 	}
 	for _, event := range sink.events {
-		if event.Status == evidence.StatusFailed && event.Error != "restore operation failed" && event.Error != "container cleanup failed" {
-			t.Errorf("failed event has non-generic error: %#v", event)
+		if event.Operation == "archive_open" && event.Status == evidence.StatusFailed &&
+			event.Error != "backup archive open failed" {
+			t.Errorf("archive failure event has no safe category: %#v", event)
+		}
+		if event.Operation == "cleanup" && event.Status == evidence.StatusFailed &&
+			event.Error != "container cleanup failed" {
+			t.Errorf("cleanup failure event has unexpected error: %#v", event)
 		}
 	}
 }
@@ -545,6 +583,25 @@ func assertEvidenceSequence(t *testing.T, events []evidence.Event, want []string
 	if !equalStrings(got, want) {
 		t.Fatalf("evidence sequence = %v, want %v", got, want)
 	}
+}
+
+type blockingPipelineEvidence struct {
+	runID     string
+	operation string
+	status    evidence.Status
+	cancel    context.CancelFunc
+}
+
+func (sink *blockingPipelineEvidence) Append(ctx context.Context, event evidence.Event) error {
+	if event.RunID != sink.runID {
+		return errors.New("wrong run")
+	}
+	if event.Operation == sink.operation && event.Status == sink.status {
+		sink.cancel()
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return event.Validate()
 }
 
 type pipelineTestRepository struct {

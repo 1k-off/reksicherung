@@ -27,6 +27,7 @@ const (
 	dropDBTimeout        = 30 * time.Second
 	nativeRestoreTimeout = 6 * time.Hour
 	fileListTimeout      = 30 * time.Second
+	headerOnlyColumns    = 59
 	maxNativeBackupBytes = int64(1 << 40)
 	pollInterval         = time.Second
 )
@@ -58,6 +59,9 @@ var (
 	ErrInvalidBackupMetadata = errors.New("SQL Server backup metadata is invalid or unsupported")
 	// ErrBackupTransferFailed indicates that the bounded backup transfer failed.
 	ErrBackupTransferFailed = errors.New("SQL Server backup transfer failed")
+	// ErrBackupCleanupFailed indicates that the staged backup could not be
+	// removed from the managed restore container.
+	ErrBackupCleanupFailed = errors.New("SQL Server backup cleanup failed")
 )
 
 type commandRuntime interface {
@@ -107,7 +111,7 @@ func New(runtime commandRuntime, target container.Container, database, password 
 // RestoreBackup transfers one bounded native SQL Server backup into the fixed
 // restore-container path, reads its file list, and restores only into the
 // database bound to this Operations value. The archive is always closed.
-func (operations *Operations) RestoreBackup(ctx context.Context, archive io.ReadCloser) error {
+func (operations *Operations) RestoreBackup(ctx context.Context, archive io.ReadCloser) (returnErr error) {
 	if archive == nil {
 		return ErrInvalidConfig
 	}
@@ -135,8 +139,26 @@ func (operations *Operations) RestoreBackup(ctx context.Context, archive io.Read
 		}
 		return ErrBackupTransferFailed
 	}
+	defer func() {
+		if err := operations.removeNativeBackup(operationCtx); err != nil {
+			returnErr = errors.Join(returnErr, err)
+		}
+	}()
 
+	headerQuery := "RESTORE HEADERONLY FROM DISK = " + quoteStringLiteral(nativeBackupPath) + ";"
+	headerCtx, headerCancel := boundedChildContext(operationCtx, fileListTimeout)
+	headerOutput, err := operations.executeWithOptions(headerCtx, headerQuery, "-h", "-1", "-W", "-s", "|")
+	if err != nil {
+		sanitizedErr := sanitizeRestoreCommandError(headerCtx, err)
+		headerCancel()
+		return sanitizedErr
+	}
+	headerCancel()
+	if err := validateSingleFullBackupSet(headerOutput); err != nil {
+		return err
+	}
 	fileListQuery := "RESTORE FILELISTONLY FROM DISK = " + quoteStringLiteral(nativeBackupPath) + ";"
+	fileListQuery = strings.TrimSuffix(fileListQuery, ";") + " WITH FILE = 1;"
 	fileListCtx, fileListCancel := boundedChildContext(operationCtx, fileListTimeout)
 	output, err := operations.executeWithOptions(fileListCtx, fileListQuery, "-h", "-1", "-W", "-s", "|")
 	if err != nil {
@@ -156,6 +178,21 @@ func (operations *Operations) RestoreBackup(ctx context.Context, archive io.Read
 	}
 	if _, err := operations.executeBounded(operationCtx, nativeRestoreTimeout, query); err != nil {
 		return sanitizeRestoreCommandError(operationCtx, err)
+	}
+	return nil
+}
+
+func (operations *Operations) removeNativeBackup(ctx context.Context) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), commandTimeout)
+	defer cancel()
+	_, err := operations.runtime.ExecWithEnvironment(
+		cleanupCtx,
+		operations.target,
+		[]string{"rm", "-f", "--", nativeBackupPath},
+		nil,
+	)
+	if err != nil {
+		return ErrBackupCleanupFailed
 	}
 	return nil
 }
@@ -390,6 +427,27 @@ func parseBackupFileList(output []byte) ([]backupFile, error) {
 		return nil, ErrInvalidBackupMetadata
 	}
 	return files, nil
+}
+
+func validateSingleFullBackupSet(output []byte) error {
+	if len(output) == 0 || len(output) > maxOutputBytes || !utf8.Valid(output) {
+		return ErrInvalidBackupMetadata
+	}
+	text := strings.TrimSuffix(string(output), "\n")
+	if text == "" || strings.Contains(text, "\n") {
+		return ErrInvalidBackupMetadata
+	}
+	row := strings.TrimSuffix(text, "\r")
+	for _, char := range row {
+		if unicode.IsControl(char) {
+			return ErrInvalidBackupMetadata
+		}
+	}
+	columns := strings.Split(row, "|")
+	if len(columns) != headerOnlyColumns || columns[2] != "1" || columns[5] != "1" {
+		return ErrInvalidBackupMetadata
+	}
+	return nil
 }
 
 func validLogicalFileName(name string) bool {

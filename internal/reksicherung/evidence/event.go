@@ -40,9 +40,10 @@ var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 // Metadata keys are intentionally restricted to common non-secret evidence
 // fields. Add a key only when its purpose and safe value format are understood.
 var metadataKeys = map[string]struct{}{
-	"attempt": {}, "backup_id": {}, "check_name": {}, "component": {},
-	"duration_ms": {}, "model": {}, "outcome": {}, "provider": {},
-	"resource_id": {}, "result": {}, "source_id": {}, "version": {},
+	"attempt": {}, "backup_id": {}, "check_name": {}, "cleanup_mode": {},
+	"component": {}, "database": {}, "duration_ms": {}, "model": {},
+	"outcome": {}, "provider": {}, "resource_id": {}, "result": {},
+	"source_id": {}, "version": {},
 }
 
 var sensitiveMetadataKeyPattern = regexp.MustCompile(`(?i)(password|passwd|pwd|secret|token|api.?key|access.?key|credential|authorization|private.?key|connection.?string)`)

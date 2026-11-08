@@ -245,7 +245,7 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 	if err != nil {
 		return Result{}, finishFailedStep(ctx, request, "gobackup_selection", selectionStarted, ErrUnsupportedFormat, nil)
 	}
-	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "gobackup_selection", evidence.StatusSucceeded, map[string]string{
+	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "gobackup_selection", evidence.StatusSucceeded, map[string]string{
 		"provider":  "gobackup",
 		"result":    request.Source.Selection.Policy,
 		"source_id": request.Source.ID,
@@ -281,8 +281,9 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 	defer func() {
 		if spec.RetainForReview {
 			if appendErr := appendEvidenceWithCleanupContext(ctx, request.EvidenceSink, request.RunID, "cleanup", evidence.StatusSkipped, map[string]string{
-				"outcome":     "retained",
-				"resource_id": target.ID,
+				"cleanup_mode": "hold_for_review",
+				"outcome":      "retained",
+				"resource_id":  target.ID,
 			}, "", 0); appendErr != nil {
 				returnErr = errors.Join(returnErr, appendErr)
 			}
@@ -292,22 +293,25 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 		defer cleanupCancel()
 		cleanupStarted := time.Now()
 		startAppendErr := appendEvidence(cleanupCtx, request.EvidenceSink, request.RunID, "cleanup", evidence.StatusStarted, map[string]string{
-			"component":   "sqlserver",
-			"resource_id": target.ID,
+			"component":    "sqlserver",
+			"cleanup_mode": "delete",
+			"resource_id":  target.ID,
 		}, "", 0)
 		if cleanupErr := pipeline.dependencies.Runtime.Remove(cleanupCtx, target); cleanupErr != nil {
 			returnErr = errors.Join(returnErr, errors.New("remove SQL Server restore container failed"))
 			if appendErr := appendEvidence(cleanupCtx, request.EvidenceSink, request.RunID, "cleanup", evidence.StatusFailed, map[string]string{
-				"component":   "sqlserver",
-				"outcome":     "remove_failed",
-				"resource_id": target.ID,
+				"component":    "sqlserver",
+				"cleanup_mode": "delete",
+				"outcome":      "remove_failed",
+				"resource_id":  target.ID,
 			}, "container cleanup failed", time.Since(cleanupStarted)); appendErr != nil {
 				returnErr = errors.Join(returnErr, appendErr)
 			}
 		} else if appendErr := appendEvidence(cleanupCtx, request.EvidenceSink, request.RunID, "cleanup", evidence.StatusSucceeded, map[string]string{
-			"component":   "sqlserver",
-			"outcome":     "removed",
-			"resource_id": target.ID,
+			"component":    "sqlserver",
+			"cleanup_mode": "delete",
+			"outcome":      "removed",
+			"resource_id":  target.ID,
 		}, "", time.Since(cleanupStarted)); appendErr != nil {
 			returnErr = errors.Join(returnErr, appendErr)
 		}
@@ -315,7 +319,7 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 			returnErr = errors.Join(returnErr, startAppendErr)
 		}
 	}()
-	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "container_creation", evidence.StatusSucceeded, map[string]string{
+	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "container_creation", evidence.StatusSucceeded, map[string]string{
 		"component":   "sqlserver",
 		"result":      "created",
 		"resource_id": target.ID,
@@ -340,7 +344,7 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 		}
 		return result, finishFailedStep(ctx, request, "sql_readiness", readinessStarted, errors.New("wait for SQL Server readiness failed"), map[string]string{"component": "sqlserver"})
 	}
-	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "sql_readiness", evidence.StatusSucceeded, map[string]string{"component": "sqlserver", "result": "ready"}, "", time.Since(readinessStarted)); err != nil {
+	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "sql_readiness", evidence.StatusSucceeded, map[string]string{"component": "sqlserver", "result": "ready"}, "", time.Since(readinessStarted)); err != nil {
 		return result, err
 	}
 
@@ -355,7 +359,7 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 		}
 		return result, finishFailedStep(ctx, request, "archive_open", archiveOpenStarted, errors.New("open GoBackup archive failed"), map[string]string{"provider": "gobackup"})
 	}
-	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "archive_open", evidence.StatusSucceeded, map[string]string{"provider": "gobackup", "result": "opened"}, "", time.Since(archiveOpenStarted)); err != nil {
+	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "archive_open", evidence.StatusSucceeded, map[string]string{"provider": "gobackup", "result": "opened"}, "", time.Since(archiveOpenStarted)); err != nil {
 		if closeErr := archive.Close(); closeErr != nil {
 			return result, errors.Join(err, errors.New("close GoBackup archive failed"))
 		}
@@ -379,7 +383,7 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 		}
 		return result, finishFailedStep(ctx, request, "archive_import", importStarted, errors.New("import GoBackup BACPAC failed"), map[string]string{"provider": "gobackup"})
 	}
-	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "archive_import", evidence.StatusSucceeded, map[string]string{"provider": "gobackup", "result": "imported"}, "", time.Since(importStarted)); err != nil {
+	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "archive_import", evidence.StatusSucceeded, map[string]string{"provider": "gobackup", "result": "imported"}, "", time.Since(importStarted)); err != nil {
 		return result, err
 	}
 
@@ -402,8 +406,9 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 		return result, finishFailedStep(ctx, request, "dbcc_checkdb", dbccStarted,
 			errors.New("DBCC CHECKDB reported an unexpected target"), map[string]string{"check_name": "DBCC_CHECKDB"})
 	}
-	if err := appendEvidence(ctx, request.EvidenceSink, request.RunID, "dbcc_checkdb", evidence.StatusSucceeded, map[string]string{
+	if err := appendEvidence(operationCtx, request.EvidenceSink, request.RunID, "dbcc_checkdb", evidence.StatusSucceeded, map[string]string{
 		"check_name": "DBCC_CHECKDB",
+		"database":   database,
 		"outcome":    "command_completed",
 	}, "", time.Since(dbccStarted)); err != nil {
 		return result, err
@@ -414,16 +419,45 @@ func (pipeline *Pipeline) Restore(ctx context.Context, request Request) (result 
 
 func finishFailedStep(ctx context.Context, request Request, operation string, started time.Time, operationErr error, metadata map[string]string) error {
 	status := evidence.StatusFailed
-	eventError := "restore operation failed"
+	eventError := evidenceFailureReason(operation, operationErr)
 	if errors.Is(operationErr, context.Canceled) || errors.Is(operationErr, context.DeadlineExceeded) {
 		status = evidence.StatusCanceled
-		eventError = ""
+		if errors.Is(operationErr, context.DeadlineExceeded) {
+			eventError = "restore operation timed out"
+		} else {
+			eventError = ""
+		}
 	}
 	appendErr := appendEvidenceWithCleanupContext(ctx, request.EvidenceSink, request.RunID, operation, status, metadata, eventError, time.Since(started))
 	if appendErr != nil {
 		return errors.Join(operationErr, appendErr)
 	}
 	return operationErr
+}
+
+func evidenceFailureReason(operation string, err error) string {
+	switch {
+	case errors.Is(err, ErrLimitExceeded):
+		return "configured restore size limit exceeded"
+	case errors.Is(err, ErrUnsupportedFormat):
+		return "unsupported backup archive format"
+	}
+	switch operation {
+	case "gobackup_selection":
+		return "backup selection failed"
+	case "container_creation":
+		return "restore container creation failed"
+	case "sql_readiness":
+		return "SQL Server readiness check failed"
+	case "archive_open":
+		return "backup archive open failed"
+	case "archive_import":
+		return "BACPAC import failed"
+	case "dbcc_checkdb":
+		return "DBCC CHECKDB command did not complete successfully"
+	default:
+		return "restore operation failed"
+	}
 }
 
 func appendEvidenceWithCleanupContext(ctx context.Context, sink EvidenceSink, runID, operation string, status evidence.Status, metadata map[string]string, eventError string, duration time.Duration) error {
