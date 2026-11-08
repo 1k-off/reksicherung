@@ -8,6 +8,30 @@ target database name must be derived from the managed run ID by
 `restore/sqlserver.DatabaseNameForRun`; this prevents the importer and cleanup
 adapter from targeting SQL Server system databases or unrelated databases.
 
+## Restore pipeline
+
+`NewStoragePipeline` composes the storage-backed GoBackup selector, isolated
+container runtime, `Importer`, and SQL Server restore operations. It accepts a
+validated catalog source, a run ID, and the resolved per-run SQL Server
+password. The storage prefix must be configured explicitly; the catalog
+`selection` policy chooses either the newest object or one relative object ID.
+Only plain `.tar` and gzip-compressed `.tar.gz`/`.tgz` archives are accepted.
+
+The pipeline maps the catalog CPU, memory, image, and timeout limits into a
+container specification, with a separately bounded writable-layer disk limit.
+The archive and BACPAC byte limits are explicit pipeline settings. It derives
+the only target database name with `sqlserver.DatabaseNameForRun`, imports as
+the container's `sa` login, waits for SQL Server readiness, then invokes the
+fixed non-repair `DBCC CHECKDB` operation.
+
+Automatic cleanup removes the restore container after success or failure and
+returns a sanitized cleanup error if removal fails. `hold_for_review` is passed
+to the runtime and suppresses pipeline removal on both success and failure.
+The result's `IntegrityCommandCompleted` field means only that the DBCC command
+completed without a SQL command error; it does not claim the database has no
+consistency errors. Pipeline dependencies can be replaced with small interfaces
+for unit testing without running storage, SQL Server, or Podman.
+
 ## Required restore image
 
 The adapter does not make the stock
