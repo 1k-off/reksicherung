@@ -17,6 +17,9 @@ const (
 	KindBAK    = "bak"
 	KindBACPAC = "bacpac"
 	idBytes    = 16
+
+	// DefaultDirectory is used when REKSICHERUNG_ARTIFACT_STAGE_DIR is unset.
+	DefaultDirectory = "/var/lib/reksicherung/artifacts"
 )
 
 var (

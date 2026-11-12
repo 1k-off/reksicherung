@@ -1,19 +1,26 @@
 # Production-oriented operator stack. Build images from the repository root:
 #   docker compose -f examples/compose/docker-compose.yml build
-# Initialize OpenBao, load KV secrets, create the SQL restore login, then start.
+# Initialize OpenBao, load KV secrets (defaults + per-source + sqlserver),
+# create the SQL restore login, then start.
 #
-# Network isolation is operator-owned: do not attach this network to production
-# database services. Pin image digests before production promotion.
+# Per-backup S3/Restic credentials are NOT compose env vars — see
+# docs/schemas/openbao-source-kv.md and docs/inputs.md.
 
 name: reksicherung
 
 services:
   openbao:
     image: openbao/openbao:2.1.0
-    command: ["server", "-config=/vault/config/config.hcl"]
+    # Official image paths: /openbao/{config,file,logs}. Entrypoint chowns
+    # those dirs for user openbao before drop-root (see docker-entrypoint.sh).
+    environment:
+      VAULT_ADDR: http://127.0.0.1:8200
+      BAO_ADDR: http://127.0.0.1:8200
+    # Entrypoint already adds -config=/openbao/config; do not pass a second -config.
+    command: ["server"]
     volumes:
-      - ./openbao/config.hcl:/vault/config/config.hcl:ro
-      - openbao-data:/vault/file
+      - ./openbao/config.hcl:/openbao/config/config.hcl:ro
+      - openbao-data:/openbao/file
     ports:
       - "127.0.0.1:8200:8200"
     networks: [reksicherung]
@@ -33,6 +40,11 @@ services:
     volumes:
       - sql-data:/var/opt/mssql/data
       - sql-backup:/var/opt/mssql/backup
+    ports:
+      # Host 11433: Podman user-mode networking on this Windows host does not
+      # forward container 1433 to host 1433 (8200 works). Inside compose the
+      # service remains sqlserver:1433; OpenBao HOST stays sqlserver.
+      - "127.0.0.1:11433:1433"
     networks: [reksicherung]
     restart: unless-stopped
     deploy:
@@ -40,7 +52,6 @@ services:
         limits:
           cpus: "2.0"
           memory: 4G
-    # Do not publish 1433 on the host in production.
 
   gobackup-mcp:
     build:
@@ -48,16 +59,11 @@ services:
       dockerfile: deploy/docker/Dockerfile.gobackup
     image: reksicherung/mcp-gobackup:local
     environment:
-      REKSICHERUNG_GOBACKUP_S3_ENDPOINT: ${REKSICHERUNG_GOBACKUP_S3_ENDPOINT}
-      REKSICHERUNG_GOBACKUP_S3_REGION: ${REKSICHERUNG_GOBACKUP_S3_REGION}
-      REKSICHERUNG_GOBACKUP_S3_BUCKET: ${REKSICHERUNG_GOBACKUP_S3_BUCKET}
-      REKSICHERUNG_GOBACKUP_S3_PREFIX: ${REKSICHERUNG_GOBACKUP_S3_PREFIX}
-      REKSICHERUNG_GOBACKUP_S3_ACCESS_KEY_REF: ${REKSICHERUNG_GOBACKUP_S3_ACCESS_KEY_REF}
-      REKSICHERUNG_GOBACKUP_S3_SECRET_KEY_REF: ${REKSICHERUNG_GOBACKUP_S3_SECRET_KEY_REF}
-      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
-      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR}
-      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR:-/var/lib/reksicherung/artifacts}
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES:-214748364800}
     volumes:
       - artifact-stage:/var/lib/reksicherung/artifacts
     networks: [reksicherung]
@@ -71,15 +77,11 @@ services:
       dockerfile: deploy/docker/Dockerfile.restic
     image: reksicherung/mcp-restic:local
     environment:
-      REKSICHERUNG_RESTIC_REPOSITORY: ${REKSICHERUNG_RESTIC_REPOSITORY}
-      REKSICHERUNG_RESTIC_PASSWORD_REF: ${REKSICHERUNG_RESTIC_PASSWORD_REF}
-      REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF: ${REKSICHERUNG_RESTIC_AWS_ACCESS_KEY_ID_REF}
-      REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF: ${REKSICHERUNG_RESTIC_AWS_SECRET_ACCESS_KEY_REF}
-      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
-      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
-      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR}
-      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR:-/var/lib/reksicherung/artifacts}
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES:-214748364800}
     volumes:
       - artifact-stage:/var/lib/reksicherung/artifacts
     networks: [reksicherung]
@@ -93,17 +95,13 @@ services:
       dockerfile: deploy/docker/Dockerfile.sqlserver-restore
     image: reksicherung/mcp-sqlserver-restore:local
     environment:
-      REKSICHERUNG_SQLSERVER_ADDRESS: tcp:sqlserver,1433
-      REKSICHERUNG_SQLSERVER_RESTORE_USERNAME: ${REKSICHERUNG_SQLSERVER_RESTORE_USERNAME}
-      REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF: ${REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF}
-      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
-      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR}
-      REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR}
-      REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR}
-      REKSICHERUNG_SQLCMD: sqlcmd
-      REKSICHERUNG_SQLPACKAGE: sqlpackage
-      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR:-/var/lib/reksicherung/artifacts}
+      REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR:-/var/opt/mssql/backup}
+      REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR:-/var/opt/mssql/data}
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES:-214748364800}
     volumes:
       - artifact-stage:/var/lib/reksicherung/artifacts
       - sql-backup:/var/opt/mssql/backup
@@ -119,14 +117,16 @@ services:
       dockerfile: deploy/docker/Dockerfile.sqlserver-inspect
     image: reksicherung/mcp-sqlserver-inspect:local
     environment:
-      # Set per-run by Airon after restore derives the database name.
-      REKSICHERUNG_SQLSERVER_DSN: ${REKSICHERUNG_SQLSERVER_DSN:-}
-      REKSICHERUNG_SQLSERVER_DATABASE: ${REKSICHERUNG_SQLSERVER_DATABASE:-}
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      # Lab/Cursor default; after restore restart with reksicherung_<hash>.
+      REKSICHERUNG_SQLSERVER_DATABASE: ${REKSICHERUNG_SQLSERVER_DATABASE:-master}
     networks: [reksicherung]
     stdin_open: true
     restart: unless-stopped
     profiles: ["mcp-stdio"]
-    depends_on: [sqlserver]
+    depends_on: [sqlserver, openbao]
 
   cleanup-reconciler:
     build:
@@ -135,14 +135,12 @@ services:
     image: reksicherung/cli:local
     command: ["reconcile", "-registry", "/var/lib/reksicherung/runs/runs.db", "-interval", "30s"]
     environment:
-      REKSICHERUNG_SQLSERVER_ADDRESS: tcp:sqlserver,1433
-      REKSICHERUNG_SQLSERVER_RESTORE_USERNAME: ${REKSICHERUNG_SQLSERVER_RESTORE_USERNAME}
-      REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF: ${REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF}
-      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      # In-network OpenBao (not host .env 127.0.0.1). PLAINTEXT=1 is lab-only.
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
-      REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR}
-      REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR}
-      REKSICHERUNG_SQLCMD: sqlcmd
+      REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR:-/var/opt/mssql/backup}
+      REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR:-/var/opt/mssql/data}
     volumes:
       - run-registry:/var/lib/reksicherung/runs
       - sql-backup:/var/opt/mssql/backup
@@ -153,8 +151,6 @@ services:
 networks:
   reksicherung:
     driver: bridge
-    # Do not mark this network internal: MCP processes need egress to S3/OpenBao.
-    # Keep SQL Server unpublished and firewalled from production DB networks.
 
 volumes:
   openbao-data:

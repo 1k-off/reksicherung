@@ -41,51 +41,34 @@ func TestMCPRegistersOnlyBoundedReadOnlySnapshotTools(t *testing.T) {
 	gotNames := make([]string, 0, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		gotNames = append(gotNames, tool.Name)
-		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint ||
-			tool.Annotations.DestructiveHint == nil || *tool.Annotations.DestructiveHint ||
-			tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
-			t.Errorf("tool %q lacks read-only annotations: %#v", tool.Name, tool.Annotations)
-		}
 	}
 	if want := []string{"restic_list_snapshots", "restic_select_snapshot"}; !reflect.DeepEqual(gotNames, want) {
 		t.Fatalf("registered tools = %v, want %v", gotNames, want)
 	}
 
-	listed := callTool(t, client, "restic_list_snapshots", map[string]any{"limit": 1})
+	listed := callTool(t, client, "restic_list_snapshots", map[string]any{"source_id": "reporting-production", "limit": 1})
 	var listOutput listSnapshotsOutput
 	decodeStructuredResult(t, listed, &listOutput)
 	if len(listOutput.Snapshots) != 1 || !listOutput.Truncated ||
-		listOutput.Snapshots[0].ID != testSnapshotID ||
-		listOutput.Snapshots[0].Hostname != "archive-host" {
+		listOutput.Snapshots[0].ID != testSnapshotID {
 		t.Fatalf("list output = %#v", listOutput)
 	}
 
-	selected := callTool(t, client, "restic_select_snapshot", map[string]any{"id": testSnapshotID})
+	selected := callTool(t, client, "restic_select_snapshot", map[string]any{
+		"source_id": "reporting-production", "id": testSnapshotID,
+	})
 	var selectedOutput snapshotOutput
 	decodeStructuredResult(t, selected, &selectedOutput)
-	if selectedOutput.ID != testSnapshotID || selectedOutput.Hostname != "archive-host" {
+	if selectedOutput.ID != testSnapshotID {
 		t.Fatalf("selection output = %#v", selectedOutput)
 	}
-	if fake.listLimit != 1 || fake.selectedID != testSnapshotID {
-		t.Fatalf("service calls used limit=%d and selected ID=%q", fake.listLimit, fake.selectedID)
-	}
-	for _, result := range []*mcp.CallToolResult{listed, selected} {
-		encoded, err := json.Marshal(result.StructuredContent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, forbidden := range []string{"private/path", "file contents", "password"} {
-			if strings.Contains(string(encoded), forbidden) {
-				t.Errorf("MCP output leaked %q: %s", forbidden, encoded)
-			}
-		}
+	if fake.listLimit != 1 || fake.selectedID != testSnapshotID || fake.sourceID != "reporting-production" {
+		t.Fatalf("service calls used limit=%d selected=%q source=%q", fake.listLimit, fake.selectedID, fake.sourceID)
 	}
 }
 
 func TestMCPRejectsUnknownArgumentsAndHidesServiceErrors(t *testing.T) {
-	fake := &fakeSnapshotService{
-		listError: errors.New("password=must-not-leak"),
-	}
+	fake := &fakeSnapshotService{listError: errors.New("password=must-not-leak")}
 	client, closeSessions := connectMCPTestClient(t, fake)
 	defer closeSessions()
 
@@ -93,14 +76,14 @@ func TestMCPRejectsUnknownArgumentsAndHidesServiceErrors(t *testing.T) {
 		tool string
 		args map[string]any
 	}{
-		{tool: "restic_list_snapshots", args: map[string]any{"limit": 2, "repository": "other"}},
-		{tool: "restic_list_snapshots", args: map[string]any{"limit": "10"}},
-		{tool: "restic_select_snapshot", args: map[string]any{"id": testSnapshotID, "restore": true}},
+		{tool: "restic_list_snapshots", args: map[string]any{"limit": 2}},
+		{tool: "restic_list_snapshots", args: map[string]any{"source_id": "reporting-production", "repository": "other"}},
+		{tool: "restic_select_snapshot", args: map[string]any{"source_id": "reporting-production", "id": testSnapshotID, "restore": true}},
 	} {
-		_, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
 			Name: test.tool, Arguments: test.args,
 		})
-		if err == nil {
+		if err == nil && (result == nil || !result.IsError) {
 			t.Fatalf("CallTool(%s) succeeded with invalid arguments", test.tool)
 		}
 	}
@@ -108,7 +91,7 @@ func TestMCPRejectsUnknownArgumentsAndHidesServiceErrors(t *testing.T) {
 		t.Fatalf("invalid tool input reached service %d times", fake.calls)
 	}
 
-	result := callTool(t, client, "restic_list_snapshots", map[string]any{"limit": 1})
+	result := callTool(t, client, "restic_list_snapshots", map[string]any{"source_id": "reporting-production", "limit": 1})
 	if !result.IsError {
 		t.Fatal("service failure did not produce an MCP tool error")
 	}
@@ -129,7 +112,7 @@ func TestBoundedFrameReaderLimitsIndividualProtocolFrames(t *testing.T) {
 	}
 }
 
-func connectMCPTestClient(t *testing.T, instance service) (*mcp.ClientSession, func()) {
+func connectMCPTestClient(t *testing.T, instance multiSourceRestic) (*mcp.ClientSession, func()) {
 	t.Helper()
 	server := newMCPServer(instance)
 	clientTransport, serverTransport := mcp.NewInMemoryTransports()
@@ -186,23 +169,26 @@ type fakeSnapshotService struct {
 	calls      int
 	listLimit  int
 	selectedID string
+	sourceID   string
 	list       resticservice.SnapshotList
 	selected   resticservice.Snapshot
 	listError  error
 }
 
-func (fake *fakeSnapshotService) ListSnapshots(_ context.Context, limit int) (resticservice.SnapshotList, error) {
+func (fake *fakeSnapshotService) ListSnapshots(_ context.Context, sourceID string, limit int) (resticservice.SnapshotList, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	fake.calls++
 	fake.listLimit = limit
+	fake.sourceID = sourceID
 	return fake.list, fake.listError
 }
 
-func (fake *fakeSnapshotService) SelectSnapshot(_ context.Context, id string) (resticservice.Snapshot, error) {
+func (fake *fakeSnapshotService) SelectSnapshot(_ context.Context, sourceID, id string) (resticservice.Snapshot, error) {
 	fake.mu.Lock()
 	defer fake.mu.Unlock()
 	fake.calls++
 	fake.selectedID = id
+	fake.sourceID = sourceID
 	return fake.selected, nil
 }

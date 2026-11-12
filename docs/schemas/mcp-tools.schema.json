@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/mcp-tools.schema.json",
+  "title": "Reksicherung MCP tool contracts (summary)",
+  "description": "source_id is required on provider discovery/stage tools. Full per-tool JSON Schema is embedded in MCP tool registration.",
+  "type": "object",
+  "properties": {
+    "gobackup_list": {
+      "type": "object",
+      "required": ["source_id"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 8 }
+      }
+    },
+    "gobackup_latest": {
+      "type": "object",
+      "required": ["source_id"],
+      "properties": { "source_id": { "type": "string" } }
+    },
+    "gobackup_select": {
+      "type": "object",
+      "required": ["source_id", "id"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    },
+    "gobackup_list_archive_candidates": {
+      "type": "object",
+      "required": ["source_id", "id"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "id": { "type": "string" }
+      }
+    },
+    "gobackup_stage_artifact": {
+      "type": "object",
+      "required": ["source_id", "id"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "id": { "type": "string" },
+        "member_path": {
+          "type": "string",
+          "description": "Exact archive member path from gobackup_list_archive_candidates when multiple terminal .bak/.bacpac files exist."
+        }
+      }
+    },
+    "gobackup_stage_artifact_ambiguous": {
+      "type": "object",
+      "description": "Structured error payload when gobackup_stage_artifact cannot pick a unique terminal member (IsError=true, code=ambiguous_archive).",
+      "required": ["code", "candidates"],
+      "properties": {
+        "code": { "const": "ambiguous_archive" },
+        "message": { "type": "string" },
+        "candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "size", "kind_hint"],
+            "properties": {
+              "path": { "type": "string" },
+              "size": { "type": "integer" },
+              "kind_hint": { "type": "string", "enum": ["bak", "bacpac"] }
+            }
+          }
+        },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "restic_list_snapshots": {
+      "type": "object",
+      "required": ["source_id"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "limit": { "type": "integer" }
+      }
+    },
+    "restic_select_snapshot": {
+      "type": "object",
+      "required": ["source_id", "snapshot_id"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "snapshot_id": { "type": "string" }
+      }
+    },
+    "restic_stage_artifact": {
+      "type": "object",
+      "required": ["source_id", "snapshot_id", "backup_path"],
+      "properties": {
+        "source_id": { "type": "string" },
+        "snapshot_id": { "type": "string" },
+        "backup_path": { "type": "string" }
+      }
+    }
+  }
+}

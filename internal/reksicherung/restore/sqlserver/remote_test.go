@@ -59,7 +59,7 @@ func TestRemoteOperationsRestoreOnExistingSQLServerAndCleansSharedArtifact(t *te
 		t.Fatalf("NewRemote() error = %v", err)
 	}
 
-	runID := "airon-run-123"
+	runID := "run-123"
 	database, err := DatabaseNameForRun(runID)
 	if err != nil {
 		t.Fatal(err)
@@ -79,8 +79,8 @@ func TestRemoteOperationsRestoreOnExistingSQLServerAndCleansSharedArtifact(t *te
 		if !containsArgSequence(call.args, "-S", "sqlserver:1433", "-U", "restore_login", "-d", "master") {
 			t.Errorf("command not scoped to configured service and master database: %#v", call.args)
 		}
-		if containsArgSequence(call.args, "-C") {
-			t.Errorf("command disabled certificate verification: %#v", call.args)
+		if !containsArgSequence(call.args, "-C") {
+			t.Errorf("command missing TrustServerCertificate (-C): %#v", call.args)
 		}
 		if strings.Contains(strings.Join(call.args, " "), testPassword) {
 			t.Errorf("password appeared in command arguments: %#v", call.args)

@@ -113,16 +113,16 @@ func newSQLDropperFromEnv(ctx context.Context, getenv func(string) string) (runr
 	if err != nil {
 		return nil, errors.New("could not initialize configured OpenBao secret provider")
 	}
-	password, err := resolveCleanupPassword(ctx, provider, config.passwordRef)
+	sqlMaterial, err := secrets.ResolveSQLServer(ctx, provider)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("could not resolve SQL Server connection from OpenBao")
 	}
-	defer clearBytes(password)
+	defer sqlMaterial.Clear()
 
 	operations, err := sqlserver.NewRemote(nil, sqlserver.RemoteConfig{
-		Server:          config.address,
-		Username:        config.username,
-		Password:        string(password),
+		Server:          sqlMaterial.SQLCmdAddress(),
+		Username:        sqlMaterial.Username,
+		Password:        string(sqlMaterial.Password),
 		BackupDirectory: config.backupDirectory,
 		DataDirectory:   config.dataDirectory,
 		SQLCmd:          config.sqlCmd,
@@ -136,9 +136,6 @@ func newSQLDropperFromEnv(ctx context.Context, getenv func(string) string) (runr
 }
 
 type cleanupSQLConfig struct {
-	address         string
-	username        string
-	passwordRef     string
 	backupDirectory string
 	dataDirectory   string
 	sqlCmd          string
@@ -148,45 +145,23 @@ type cleanupSQLConfig struct {
 
 func loadCleanupSQLConfig(getenv func(string) string) (cleanupSQLConfig, error) {
 	config := cleanupSQLConfig{
-		address:         getenv("REKSICHERUNG_SQLSERVER_ADDRESS"),
-		username:        getenv("REKSICHERUNG_SQLSERVER_RESTORE_USERNAME"),
-		passwordRef:     getenv("REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF"),
 		backupDirectory: getenv("REKSICHERUNG_SQLSERVER_BACKUP_DIR"),
 		dataDirectory:   getenv("REKSICHERUNG_SQLSERVER_DATA_DIR"),
 		sqlCmd:          getenv("REKSICHERUNG_SQLCMD"),
 		openBaoAddress:  getenv("REKSICHERUNG_OPENBAO_ADDR"),
 		openBaoToken:    getenv("REKSICHERUNG_OPENBAO_TOKEN"),
 	}
-	for _, value := range []string{
-		config.address, config.username, config.passwordRef,
-		config.backupDirectory, config.dataDirectory,
-		config.openBaoAddress, config.openBaoToken,
-	} {
-		if strings.TrimSpace(value) == "" {
-			return cleanupSQLConfig{}, errors.New("required SQL cleanup configuration is missing")
-		}
+	if strings.TrimSpace(config.backupDirectory) == "" {
+		config.backupDirectory = sqlserver.DefaultBackupDirectory
+	}
+	if strings.TrimSpace(config.dataDirectory) == "" {
+		config.dataDirectory = sqlserver.DefaultDataDirectory
+	}
+	if strings.TrimSpace(config.openBaoAddress) == "" || strings.TrimSpace(config.openBaoToken) == "" {
+		return cleanupSQLConfig{}, errors.New("required SQL cleanup configuration is missing")
 	}
 	if config.sqlCmd == "" {
 		config.sqlCmd = "sqlcmd"
 	}
 	return config, nil
-}
-
-func resolveCleanupPassword(ctx context.Context, provider secrets.SecretProvider, raw string) ([]byte, error) {
-	reference, err := secrets.ParseReference(raw)
-	if err != nil {
-		return nil, errors.New("invalid secret reference")
-	}
-	value, err := provider.Resolve(ctx, reference)
-	if err != nil || len(value) == 0 {
-		clearBytes(value)
-		return nil, errors.New("secret resolution failed")
-	}
-	return value, nil
-}
-
-func clearBytes(value []byte) {
-	for i := range value {
-		value[i] = 0
-	}
 }

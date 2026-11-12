@@ -18,7 +18,7 @@ type Database struct {
 
 // DatabaseRunner performs the workflow for one database. Implementations own
 // integrations such as backup providers, restore environments, validation
-// tools, and Airon calls; the coordinator depends on none of those systems.
+// tools, and orchestrator callbacks; the coordinator depends on none of those systems.
 //
 // Implementations should honor context cancellation and return sanitized
 // errors. A returned error is recorded as a failed database execution.

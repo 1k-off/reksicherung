@@ -4,13 +4,10 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strings"
-	"time"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/artifact"
 	resticrestore "github.com/1k-off/reksicherung/internal/reksicherung/restore/restic"
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/staging"
-	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 )
 
 type resticFileOpener interface {
@@ -21,11 +18,6 @@ type resticArtifactStager struct {
 	client resticFileOpener
 	store  *staging.Store
 	limits artifact.Limits
-}
-
-type resticStageArgs struct {
-	SnapshotID string `json:"snapshot_id" jsonschema:"Full Restic snapshot ID returned by restic_list_snapshots."`
-	BackupPath string `json:"backup_path" jsonschema:"One exact absolute file path in the selected snapshot; no wildcards or directory restore."`
 }
 
 type resticStagedArtifact struct {
@@ -67,37 +59,4 @@ func (stager *resticArtifactStager) Stage(ctx context.Context, snapshotID, backu
 	return resticStagedArtifact{
 		ArtifactID: saved.ID, Kind: saved.Kind, Size: saved.Size, SnapshotID: snapshot.ID,
 	}, nil
-}
-
-func newResticArtifactClient(ctx context.Context, config serverConfig, provider secrets.SecretProvider, maxBytes int64) (*resticrestore.Client, error) {
-	password, err := resolveSecret(ctx, provider, config.passwordRef)
-	if err != nil {
-		return nil, errors.New("could not resolve configured Restic repository password")
-	}
-	defer clear(password)
-
-	environment := []resticrestore.EnvironmentVariable{{Name: "RESTIC_PASSWORD", Value: string(password)}}
-	for _, item := range config.environment {
-		name, value, ok := strings.Cut(item, "=")
-		if !ok {
-			return nil, errors.New("invalid Restic backend environment")
-		}
-		environment = append(environment, resticrestore.EnvironmentVariable{Name: name, Value: value})
-	}
-	for _, backend := range config.backendSecrets {
-		value, err := resolveSecret(ctx, provider, backend.reference)
-		if err != nil {
-			return nil, errors.New("could not resolve configured Restic backend secret")
-		}
-		environment = append(environment, resticrestore.EnvironmentVariable{Name: backend.name, Value: string(value)})
-		clear(value)
-	}
-	client, err := resticrestore.New(resticrestore.Config{
-		Executable: "restic", Repository: config.repository, Timeout: 6 * time.Hour,
-		MaxOutputBytes: 4 << 20, MaxStreamBytes: maxBytes, Environment: environment,
-	}, resticProcessRunner{})
-	if err != nil {
-		return nil, errors.New("could not initialize Restic file reader")
-	}
-	return client, nil
 }

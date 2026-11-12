@@ -2,18 +2,15 @@ package main
 
 import (
 	"errors"
-	"net"
 	"net/url"
-	"strconv"
 	"strings"
 
-	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
+	sqlserver "github.com/1k-off/reksicherung/internal/reksicherung/restore/sqlserver"
+	"github.com/1k-off/reksicherung/internal/reksicherung/restore/staging"
+	"github.com/1k-off/reksicherung/internal/reksicherung/secrets/openbao"
 )
 
 const (
-	sqlAddressEnv   = "REKSICHERUNG_SQLSERVER_ADDRESS"
-	sqlUsernameEnv  = "REKSICHERUNG_SQLSERVER_RESTORE_USERNAME"
-	sqlPasswordRef  = "REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF"
 	stageDirEnv     = "REKSICHERUNG_ARTIFACT_STAGE_DIR"
 	backupDirEnv    = "REKSICHERUNG_SQLSERVER_BACKUP_DIR"
 	dataDirEnv      = "REKSICHERUNG_SQLSERVER_DATA_DIR"
@@ -24,9 +21,6 @@ const (
 )
 
 type restoreConfig struct {
-	address         string
-	username        string
-	passwordRef     string
 	stageDirectory  string
 	backupDirectory string
 	dataDirectory   string
@@ -38,9 +32,6 @@ type restoreConfig struct {
 
 func loadRestoreConfig(getenv func(string) string) (restoreConfig, error) {
 	config := restoreConfig{
-		address:         getenv(sqlAddressEnv),
-		username:        getenv(sqlUsernameEnv),
-		passwordRef:     getenv(sqlPasswordRef),
 		stageDirectory:  getenv(stageDirEnv),
 		backupDirectory: getenv(backupDirEnv),
 		dataDirectory:   getenv(dataDirEnv),
@@ -49,26 +40,17 @@ func loadRestoreConfig(getenv func(string) string) (restoreConfig, error) {
 		openBaoAddress:  getenv(openBaoAddrEnv),
 		openBaoToken:    getenv(openBaoTokenEnv),
 	}
-	for _, item := range []struct{ name, value string }{
-		{sqlAddressEnv, config.address},
-		{sqlUsernameEnv, config.username},
-		{sqlPasswordRef, config.passwordRef},
-		{stageDirEnv, config.stageDirectory},
-		{backupDirEnv, config.backupDirectory},
-		{dataDirEnv, config.dataDirectory},
-		{openBaoAddrEnv, config.openBaoAddress},
-		{openBaoTokenEnv, config.openBaoToken},
-	} {
-		if strings.TrimSpace(item.value) == "" {
-			return restoreConfig{}, errors.New("required restore configuration is missing")
-		}
+	if strings.TrimSpace(config.stageDirectory) == "" {
+		config.stageDirectory = staging.DefaultDirectory
 	}
-	if !validSQLCmdAddress(config.address) || strings.TrimSpace(config.username) != config.username ||
-		strings.ContainsAny(config.username, "\x00\r\n") || len(config.username) > 128 {
-		return restoreConfig{}, errors.New("invalid SQL Server restore target")
+	if strings.TrimSpace(config.backupDirectory) == "" {
+		config.backupDirectory = sqlserver.DefaultBackupDirectory
 	}
-	if _, err := secrets.ParseReference(config.passwordRef); err != nil {
-		return restoreConfig{}, errors.New("invalid SQL Server restore-password reference")
+	if strings.TrimSpace(config.dataDirectory) == "" {
+		config.dataDirectory = sqlserver.DefaultDataDirectory
+	}
+	if strings.TrimSpace(config.openBaoAddress) == "" || strings.TrimSpace(config.openBaoToken) == "" {
+		return restoreConfig{}, errors.New("required restore configuration is missing")
 	}
 	if !validOpenBaoEndpoint(config.openBaoAddress) {
 		return restoreConfig{}, errors.New("invalid OpenBao endpoint")
@@ -90,24 +72,6 @@ func loadRestoreConfig(getenv func(string) string) (restoreConfig, error) {
 	return config, nil
 }
 
-func validSQLCmdAddress(address string) bool {
-	if !strings.HasPrefix(address, "tcp:") || strings.TrimSpace(address) != address {
-		return false
-	}
-	host, portText, ok := strings.Cut(strings.TrimPrefix(address, "tcp:"), ",")
-	if !ok || host == "" || strings.HasPrefix(host, "-") || strings.ContainsAny(host, "/\\ \t\r\n") {
-		return false
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil || port < 1 || port > 65535 {
-		return false
-	}
-	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		return net.ParseIP(strings.Trim(host, "[]")) != nil
-	}
-	return !strings.Contains(host, ":")
-}
-
 func validOpenBaoEndpoint(endpoint string) bool {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Host == "" || parsed.User != nil ||
@@ -118,10 +82,5 @@ func validOpenBaoEndpoint(endpoint string) bool {
 	if parsed.Scheme == "https" {
 		return true
 	}
-	host := parsed.Hostname()
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	return openbao.HTTPEndpointAllowed(parsed.Hostname())
 }

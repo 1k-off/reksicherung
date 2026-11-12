@@ -24,9 +24,9 @@ const (
 	maxIdentifierBytes = 128
 )
 
-// AironRunIDMetaKey identifies Airon's generic run-correlation metadata in the
-// MCP request's reserved `_meta` field.
-const AironRunIDMetaKey = "com.1k-off/airon-run-id"
+// ExternalRunIDMetaKey identifies optional orchestrator run-correlation
+// metadata in the MCP request's reserved `_meta` field.
+const ExternalRunIDMetaKey = "1node.xyz/external-run-id"
 
 var identifierPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
@@ -40,20 +40,20 @@ type Service interface {
 }
 
 // Request is the validated request passed to the restore-check service.
-// AironRunID is correlation metadata only; it does not control execution.
+// ExternalRunID is optional correlation metadata from any orchestrator; it does not control execution.
 type Request struct {
 	Plan       plan.RunPlan `json:"plan" jsonschema:"Explicit database selection and execution policy."`
-	AironRunID string       `json:"airon_run_id,omitempty" jsonschema:"Optional Airon run ID for correlation only."`
+	ExternalRunID string       `json:"external_run_id,omitempty" jsonschema:"Optional external orchestrator run ID for correlation only."`
 }
 
 // ServiceResult is the bounded, structured result returned by the service.
-// AironRunID must be the correlation ID persisted with this run; it must equal
+// ExternalRunID must be the correlation ID persisted with this run; it must equal
 // the ID supplied in Request, including when both are empty. Free-form
 // summaries, errors, warnings, and evidence are deliberately not exposed by
 // this MCP tool to prevent accidental disclosure.
 type ServiceResult struct {
 	RunID      string           `json:"run_id"`
-	AironRunID string           `json:"airon_run_id,omitempty"`
+	ExternalRunID string           `json:"external_run_id,omitempty"`
 	Databases  []DatabaseResult `json:"databases"`
 	Verdict    workflow.Verdict `json:"verdict"`
 }
@@ -76,14 +76,14 @@ type CheckResult struct {
 // Result is the MCP tool's secret-free structured response.
 type Result struct {
 	RunID      string           `json:"run_id"`
-	AironRunID string           `json:"airon_run_id,omitempty"`
+	ExternalRunID string           `json:"external_run_id,omitempty"`
 	Databases  []DatabaseResult `json:"databases"`
 	Verdict    workflow.Verdict `json:"verdict"`
 }
 
 type requestWire struct {
 	Plan       json.RawMessage `json:"plan"`
-	AironRunID string          `json:"airon_run_id,omitempty"`
+	ExternalRunID string          `json:"external_run_id,omitempty"`
 }
 
 type planWire struct {
@@ -117,7 +117,7 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 	}
 	if requested.Selection.All == nil ||
 		len(requested.Selection.DatabaseIDs) > maxSelectedDBs ||
-		(raw.AironRunID != "" && !validIdentifier(raw.AironRunID)) {
+		(raw.ExternalRunID != "" && !validIdentifier(raw.ExternalRunID)) {
 		return errors.New("invalid restore-check request")
 	}
 	if *requested.Selection.All && len(requested.Selection.DatabaseIDs) != 0 ||
@@ -146,7 +146,7 @@ func (r *Request) UnmarshalJSON(data []byte) error {
 			return errors.New("invalid restore-check request")
 		}
 	}
-	*r = Request{Plan: normalizedPlan, AironRunID: raw.AironRunID}
+	*r = Request{Plan: normalizedPlan, ExternalRunID: raw.ExternalRunID}
 	return nil
 }
 
@@ -207,7 +207,7 @@ func NewServer(service Service) *mcp.Server {
 					"required":["selection","ordering","max_parallelism","error_handling"],
 					"additionalProperties":false
 				},
-				"airon_run_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$","maxLength":128}
+				"external_run_id":{"type":"string","pattern":"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$","maxLength":128}
 			},
 			"required":["plan"],
 			"additionalProperties":false
@@ -217,12 +217,12 @@ func NewServer(service Service) *mcp.Server {
 		if err := json.Unmarshal(encoded, &request); err != nil {
 			return nil, Result{}, errors.New("invalid restore-check request")
 		}
-		aironRunID, err := aironRunIDFromMeta(call)
-		if err != nil || (aironRunID != "" && request.AironRunID != "" && request.AironRunID != aironRunID) {
+		externalRunID, err := externalRunIDFromMeta(call)
+		if err != nil || (externalRunID != "" && request.ExternalRunID != "" && request.ExternalRunID != externalRunID) {
 			return nil, Result{}, errors.New("invalid restore-check request")
 		}
-		if aironRunID != "" {
-			request.AironRunID = aironRunID
+		if externalRunID != "" {
+			request.ExternalRunID = externalRunID
 		}
 		if service == nil {
 			return nil, Result{}, errors.New("restore check service unavailable")
@@ -234,7 +234,7 @@ func NewServer(service Service) *mcp.Server {
 		if len(serviceResult.Databases) == 0 || len(serviceResult.Databases) > maxSelectedDBs {
 			return nil, Result{}, errors.New("restore check failed")
 		}
-		if serviceResult.AironRunID != request.AironRunID {
+		if serviceResult.ExternalRunID != request.ExternalRunID {
 			return nil, Result{}, errors.New("restore check failed")
 		}
 		databases := make([]DatabaseResult, len(serviceResult.Databases))
@@ -252,7 +252,7 @@ func NewServer(service Service) *mcp.Server {
 		}
 		result := Result{
 			RunID:      serviceResult.RunID,
-			AironRunID: serviceResult.AironRunID,
+			ExternalRunID: serviceResult.ExternalRunID,
 			Databases:  databases,
 			Verdict:    serviceResult.Verdict,
 		}
@@ -268,17 +268,17 @@ func NewServer(service Service) *mcp.Server {
 	return server
 }
 
-func aironRunIDFromMeta(request *mcp.CallToolRequest) (string, error) {
+func externalRunIDFromMeta(request *mcp.CallToolRequest) (string, error) {
 	if request == nil || request.Params.Meta == nil {
 		return "", nil
 	}
-	value, exists := request.Params.Meta[AironRunIDMetaKey]
+	value, exists := request.Params.Meta[ExternalRunIDMetaKey]
 	if !exists {
 		return "", nil
 	}
 	runID, ok := value.(string)
 	if !ok || !validIdentifier(runID) {
-		return "", errors.New("invalid Airon run ID metadata")
+		return "", errors.New("invalid external run ID metadata")
 	}
 	return runID, nil
 }

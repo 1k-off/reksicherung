@@ -13,7 +13,7 @@ Reksicherung writes append-only JSON Lines. One file per run.
 See `internal/reksicherung/evidence.Event`. At minimum each run records:
 
 - schema/version identifiers
-- run ID and optional Airon run ID
+- run ID and optional external orchestrator run ID
 - selected provider, backup/snapshot ID (no secrets)
 - restore/import outcome
 - integrity check completion flag (not a clean-DB verdict)
@@ -23,6 +23,6 @@ See `internal/reksicherung/evidence.Event`. At minimum each run records:
 
 ## Retention
 
-Operators retain evidence and the correlated Airon JSON log together. Default
+Operators retain evidence and any correlated orchestrator logs together. Default
 recommendation: 90 days, then archive or delete per policy. Evidence is an audit
 trail, not a tamper-proof WORM store.

@@ -251,10 +251,12 @@ func (client *Client) OpenBackupFile(ctx context.Context, selection Selection, b
 		return fail(ErrBackupNotFile)
 	}
 	stream, err := runner.Stream(requestContext, Invocation{
-		Executable:     client.config.Executable,
-		Args:           []string{"--repo", client.config.Repository, "dump", selected.ID, backupPath},
-		Environment:    append([]EnvironmentVariable(nil), client.config.Environment...),
-		MaxOutputBytes: client.config.MaxOutputBytes,
+		Executable: client.config.Executable,
+		Args:       []string{"--repo", client.config.Repository, "dump", selected.ID, backupPath},
+		Environment: append([]EnvironmentVariable(nil), client.config.Environment...),
+		// Stream uses MaxStreamBytes (large artifact dump); MaxOutputBytes is
+		// only for small command stdout such as snapshots/ls JSON.
+		MaxOutputBytes: client.config.MaxStreamBytes,
 	})
 	if err != nil || stream == nil {
 		return fail(ErrCommandFailed)
@@ -371,7 +373,8 @@ func validConfig(config Config) bool {
 
 func allowedEnvironmentName(name string) bool {
 	switch name {
-	case "RESTIC_PASSWORD", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+	case "RESTIC_PASSWORD", "RESTIC_CACHE_DIR", "XDG_CACHE_HOME",
+		"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
 		"AWS_SESSION_TOKEN", "AWS_DEFAULT_REGION", "AWS_REGION":
 		return true
 	default:
@@ -522,8 +525,9 @@ func parseSnapshots(data []byte) ([]Snapshot, error) {
 		return nil, ErrInvalidSnapshotOutput
 	}
 
+	// Restic snapshot JSON grows over releases (parent, summary, excludes, …).
+	// Accept unknown fields; only id/time are required for selection.
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
 	var encoded []resticSnapshot
 	if err := decoder.Decode(&encoded); err != nil {
 		return nil, ErrInvalidSnapshotOutput

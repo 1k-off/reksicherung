@@ -1,4 +1,4 @@
-# 0001: Versioned catalog and Airon inventory
+# 0001: Versioned catalog and backup inventory
 
 **Status:** Accepted for the first SQL Server release  
 
@@ -25,11 +25,12 @@ review and require semantic review to be enabled. Production validation requires
 endpoints. Restore service images, resources, and network policy are selected
 and enforced by the operator's deployment; Reksicherung does not launch them.
 
-Airon receives a separate compact JSON inventory generated from the validated
-catalog. Inventory IDs are sorted for reproducibility. The inventory excludes
-secret references, storage endpoints, and restore settings; Reksicherung
-resolves operational details by stable source ID. Each entry has a stable
-relative `sourceLocation` reference such as `configs/catalog.yaml#backups/app`.
+Operators and orchestrators receive a separate compact JSON inventory generated
+from the validated catalog. Inventory IDs are sorted for reproducibility. The
+inventory excludes secret references, storage endpoints, and restore settings;
+Reksicherung resolves operational details by stable source ID. Each entry has a
+stable relative `sourceLocation` reference such as
+`configs/catalog.yaml#backups/app`.
 
 ## Rationale
 

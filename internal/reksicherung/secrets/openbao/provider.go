@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 const (
 	requestTimeout = 10 * time.Second
 	maxResponse    = 1 << 20
+	// PlaintextEnv allows http:// to non-loopback OpenBao endpoints (compose lab).
+	PlaintextEnv = "REKSICHERUNG_OPENBAO_PLAINTEXT"
 )
 
 var (
@@ -43,8 +46,9 @@ type Provider struct {
 // New creates a provider for an OpenBao base URL and token.
 //
 // HTTPS is required except for loopback addresses (including localhost), which
-// allows local development and test servers. Requests have a fixed timeout,
-// disable redirects, and limit response bodies to 1 MiB.
+// allows local development and test servers. Set REKSICHERUNG_OPENBAO_PLAINTEXT=1
+// to allow http:// to Docker Compose service names (lab only). Requests have a
+// fixed timeout, disable redirects, and limit response bodies to 1 MiB.
 func New(endpoint, token string) (*Provider, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Host == "" || parsed.User != nil ||
@@ -53,7 +57,7 @@ func New(endpoint, token string) (*Provider, error) {
 		(parsed.Scheme != "https" && parsed.Scheme != "http") {
 		return nil, errors.New("openbao: invalid endpoint")
 	}
-	if parsed.Scheme == "http" && !isLoopback(parsed.Hostname()) {
+	if parsed.Scheme == "http" && !HTTPEndpointAllowed(parsed.Hostname()) {
 		return nil, errors.New("openbao: HTTPS required for non-loopback endpoint")
 	}
 	if !validToken(token) {
@@ -130,6 +134,11 @@ func (p *Provider) Resolve(ctx context.Context, reference secrets.Reference) ([]
 		return nil, ErrInvalidResponse
 	}
 	return []byte(value), nil
+}
+
+// HTTPEndpointAllowed reports whether plaintext HTTP may target host.
+func HTTPEndpointAllowed(host string) bool {
+	return isLoopback(host) || os.Getenv(PlaintextEnv) == "1"
 }
 
 func isLoopback(host string) bool {

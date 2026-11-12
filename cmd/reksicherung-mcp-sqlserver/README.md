@@ -54,31 +54,21 @@ go build -o ./bin/reksicherung-mcp-sqlserver ./cmd/reksicherung-mcp-sqlserver
 
 The process requires these environment variables:
 
-- `REKSICHERUNG_SQLSERVER_DSN`: a `go-mssqldb` URL DSN. It must use the
-  `sqlserver` scheme and include exactly one `database` query parameter.
-- `REKSICHERUNG_SQLSERVER_DATABASE`: the exact same database name as the DSN.
+- `REKSICHERUNG_OPENBAO_ADDR` and `REKSICHERUNG_OPENBAO_TOKEN`.
+- `REKSICHERUNG_SQLSERVER_DATABASE`: the restored database name for this run
+  (e.g. `reksicherung_<hash>`).
 
-Example syntax (replace placeholders using a secret manager or protected
-process environment; never check a real DSN into source control):
+SQL host/user/password come from OpenBao `secret/reksicherung/sqlserver`
+(`HOST`, `USERNAME`, `PASSWORD`; optional `PORT`). The MCP builds the DSN
+internally and never accepts credentials from tool callers.
 
-```sh
-REKSICHERUNG_SQLSERVER_DSN='sqlserver://<login>:<url-escaped-password>@127.0.0.1:1433?database=RestoredDb&encrypt=disable'
-REKSICHERUNG_SQLSERVER_DATABASE='RestoredDb'
-```
+## Orchestrator stdio configuration
 
-The SQL Server endpoint should be reachable only from the user-managed restore
-network or the MCP process host. Startup requires verified TLS (`encrypt=true`
-or `encrypt=strict`, without `trustservercertificate=true`) for non-loopback
-hosts; unencrypted connections are accepted only to loopback addresses for local
-development. The database name in both settings must match; the process rejects
-mismatched targets and never accepts a database selector from a tool caller.
-
-## Airon stdio configuration
-
-Airon expands `${NAME}` placeholders in its configuration before starting MCP
-children. Supply the two values in Airon's protected environment and use
-`env_passthrough: false` so the child receives only the explicitly configured
-environment. Do not place literal credentials in the YAML.
+Any MCP host that expands `${NAME}` placeholders before starting MCP children
+can use this fragment. Supply values in the host's protected environment and
+use `env_passthrough: false` so the child receives only the explicitly
+configured environment. Do not place literal credentials in the YAML.
+See `examples/airon/restore-check.yaml` for one optional binding.
 
 ```yaml
 runtime:
@@ -90,7 +80,8 @@ mcp_servers:
     command: /usr/local/bin/reksicherung-mcp-sqlserver
     env_passthrough: false
     env:
-      REKSICHERUNG_SQLSERVER_DSN: ${REKSICHERUNG_SQLSERVER_DSN}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
       REKSICHERUNG_SQLSERVER_DATABASE: ${REKSICHERUNG_SQLSERVER_DATABASE}
 
 prompts:
@@ -108,7 +99,7 @@ prompts:
 ```
 
 Set `runtime.log_inputs: false` because database and table names are tool inputs and may
-otherwise be persisted by Airon. Tool results contain only metadata and
+otherwise be persisted by the orchestrator. Tool results contain only metadata and
 aggregates, not record values.
 
 ## SQL Server permissions

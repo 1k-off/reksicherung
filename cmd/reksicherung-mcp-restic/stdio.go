@@ -2,11 +2,8 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"io"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var errMCPFrameTooLarge = errors.New("MCP stdio frame exceeds the configured size limit")
@@ -71,19 +68,4 @@ func (reader *boundedFrameReader) copyPending(buffer []byte) (int, error) {
 
 func (reader *boundedFrameReader) Close() error {
 	return reader.closer.Close()
-}
-
-func serve(ctx context.Context, instance service, stager resticStagingService, stdin io.ReadCloser, stdout io.WriteCloser) error {
-	server := newMCPServer(instance, stager)
-	transport := &mcp.IOTransport{
-		Reader: newBoundedFrameReader(stdin, maxMCPFrameSize),
-		Writer: stdout,
-	}
-	if err := server.Run(ctx, transport); err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return errors.New("MCP stdio server failed")
-	}
-	return nil
 }

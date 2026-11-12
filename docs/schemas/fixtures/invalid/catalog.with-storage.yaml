@@ -1,0 +1,18 @@
+apiVersion: reksicherung.1node.xyz/v1alpha2
+kind: BackupCatalog
+backups:
+  - id: shop-production
+    provider: gobackup
+    database:
+      type: sqlserver
+      name: Shop
+    storage:
+      type: s3
+      bucket: backups
+      region: fsn1
+      credentials:
+        accessKeyRef: openbao://secret/reksicherung/s3#access-key
+        secretKeyRef: openbao://secret/reksicherung/s3#secret-key
+    selection:
+      policy: latest
+    cleanup: delete

@@ -1,5 +1,5 @@
 // Command reksicherung-mcp-restic serves read-only Restic snapshot metadata
-// tools over MCP stdio.
+// tools over MCP stdio. Per-source repository material is resolved from OpenBao.
 package main
 
 import (
@@ -9,19 +9,19 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
-	"time"
 
 	resticservice "github.com/1k-off/reksicherung/internal/reksicherung/mcp/restic"
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/artifact"
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/staging"
-	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets/openbao"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	repositoryEnv            = "REKSICHERUNG_RESTIC_REPOSITORY"
 	maxMCPFrameSize          = 64 * 1024
 	resticStageDirEnv        = "REKSICHERUNG_ARTIFACT_STAGE_DIR"
 	resticArtifactMaxEnv     = "REKSICHERUNG_ARTIFACT_MAX_BYTES"
@@ -29,9 +29,13 @@ const (
 	resticHardArtifactMax    = int64(1 << 40)
 )
 
-type service interface {
-	ListSnapshots(context.Context, int) (resticservice.SnapshotList, error)
-	SelectSnapshot(context.Context, string) (resticservice.Snapshot, error)
+type multiSourceRestic interface {
+	ListSnapshots(context.Context, string, int) (resticservice.SnapshotList, error)
+	SelectSnapshot(context.Context, string, string) (resticservice.Snapshot, error)
+}
+
+type multiSourceResticStaging interface {
+	Stage(context.Context, string, string, string) (resticStagedArtifact, error)
 }
 
 func main() {
@@ -53,10 +57,6 @@ func run(ctx context.Context, getenv func(string) string, stdin io.ReadCloser, s
 	if err != nil {
 		return errors.New("could not initialize configured OpenBao secret provider")
 	}
-	instance, err := newResticService(ctx, config, provider, nil)
-	if err != nil {
-		return err
-	}
 	maxBytes := resticDefaultArtifactMax
 	if value := getenv(resticArtifactMaxEnv); value != "" {
 		maxBytes, err = strconv.ParseInt(value, 10, 64)
@@ -64,69 +64,43 @@ func run(ctx context.Context, getenv func(string) string, stdin io.ReadCloser, s
 			return errors.New("invalid configured artifact size limit")
 		}
 	}
-	artifactStore, err := staging.New(getenv(resticStageDirEnv), maxBytes)
+	stageDirectory := strings.TrimSpace(getenv(resticStageDirEnv))
+	if stageDirectory == "" {
+		stageDirectory = staging.DefaultDirectory
+	}
+	artifactStore, err := staging.New(stageDirectory, maxBytes)
 	if err != nil {
 		return errors.New("could not initialize configured artifact staging directory")
 	}
-	fileClient, err := newResticArtifactClient(ctx, config, provider, maxBytes)
-	if err != nil {
-		return err
-	}
-	stager, err := newResticArtifactStager(fileClient, artifactStore, artifact.Limits{
-		MaxInputBytes: maxBytes, MaxExpandedBytes: maxBytes, MaxTemporaryBytes: maxBytes,
-	})
-	if err != nil {
-		return errors.New("could not initialize Restic artifact staging")
-	}
-	return serve(ctx, instance, stager, stdin, stdout)
-}
-
-func newResticService(ctx context.Context, config serverConfig, provider secrets.SecretProvider, runner resticservice.Runner) (*resticservice.Service, error) {
-	password, err := resolveSecret(ctx, provider, config.passwordRef)
-	if err != nil {
-		return nil, errors.New("could not resolve configured Restic repository-password secret")
-	}
-	defer clear(password)
-
-	environment := append([]string(nil), config.environment...)
-	for _, backend := range config.backendSecrets {
-		value, err := resolveSecret(ctx, provider, backend.reference)
-		if err != nil {
-			return nil, fmt.Errorf("could not resolve configured Restic %s secret", backend.name)
+	tempDirectory := filepath.Join(stageDirectory, "tmp")
+	cacheDirectory := filepath.Join(stageDirectory, "restic-cache")
+	for _, directory := range []string{tempDirectory, cacheDirectory} {
+		if err := os.MkdirAll(directory, 0o750); err != nil {
+			return errors.New("could not initialize artifact temporary directory")
 		}
-		environment = append(environment, backend.name+"="+string(value))
-		clear(value)
 	}
-
-	options := resticservice.Options{
-		Binary:       "restic",
-		Repository:   config.repository,
-		Password:     string(password),
-		Environment:  environment,
-		Timeout:      15 * time.Second,
-		MaxSnapshots: 100,
-	}
-	var instance *resticservice.Service
-	if runner == nil {
-		instance, err = resticservice.New(options)
-	} else {
-		instance, err = resticservice.NewWithRunner(runner, options)
-	}
+	gateway, err := newResticSourceGateway(provider, artifactStore, artifact.Limits{
+		MaxInputBytes:     maxBytes,
+		MaxExpandedBytes:  maxBytes,
+		MaxTemporaryBytes: maxBytes,
+		TempDir:           tempDirectory,
+	}, maxBytes, cacheDirectory)
 	if err != nil {
-		return nil, errors.New("could not initialize Restic snapshot discovery")
+		return errors.New("could not initialize Restic source gateway")
 	}
-	return instance, nil
+	return serve(ctx, gateway, gateway, stdin, stdout)
 }
 
-func resolveSecret(ctx context.Context, provider secrets.SecretProvider, rawReference string) ([]byte, error) {
-	reference, err := secrets.ParseReference(rawReference)
-	if err != nil {
-		return nil, errors.New("invalid secret reference")
+func serve(ctx context.Context, instance multiSourceRestic, stager multiSourceResticStaging, stdin io.ReadCloser, stdout io.WriteCloser) error {
+	server := newMCPServer(instance, stager)
+	if err := server.Run(ctx, &mcp.IOTransport{
+		Reader: newBoundedFrameReader(stdin, maxMCPFrameSize),
+		Writer: stdout,
+	}); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return errors.New("MCP stdio server failed")
 	}
-	value, err := provider.Resolve(ctx, reference)
-	if err != nil || len(value) == 0 {
-		clear(value)
-		return nil, errors.New("secret resolution failed")
-	}
-	return value, nil
+	return nil
 }

@@ -62,6 +62,7 @@ func TestListAndLatestOrderDeterministicallyAndSkipDirectoryMarkers(t *testing.T
 		"": {Objects: []storage.Object{
 			{Key: testPrefix + "z.bacpac", Size: 9, LastModified: timestamp},
 			{Key: testPrefix + "directory/", Size: 0, LastModified: timestamp.Add(time.Hour)},
+			{Key: testPrefix + ".gobackup-state/tracker.json", Size: 12, LastModified: timestamp.Add(2 * time.Hour)},
 			{Key: testPrefix + "a.bacpac", Size: 7, LastModified: timestamp},
 			{Key: testPrefix + "older.bacpac", Size: 3, LastModified: timestamp.Add(-time.Hour)},
 		}},

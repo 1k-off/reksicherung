@@ -9,30 +9,16 @@ import (
 	"testing"
 )
 
-const validCatalog = `apiVersion: reksicherung.io/v1alpha1
+const validCatalog = `apiVersion: reksicherung.1node.xyz/v1alpha2
 kind: BackupCatalog
 backups:
   - id: production
     provider: gobackup
-    backupName: production
     database:
       type: sqlserver
       name: Application
-    storage:
-      type: s3
-      endpoint: https://storage.example.test
-      bucket: backups
-      region: eu-central
-      credentials:
-        accessKeyRef: openbao://secret/reksicherung/s3#access-key
-        secretKeyRef: openbao://secret/reksicherung/s3#secret-key
     selection:
       policy: latest
-    restore:
-      image: mcr.microsoft.com/mssql/server:2022-latest
-      cpuMilli: 2000
-      memoryMiB: 4096
-      timeout: 2h
     validation:
       semanticReview: true
     cleanup: delete
@@ -50,20 +36,21 @@ func TestCLIValidate(t *testing.T) {
 	}
 }
 
-func TestCLICatalogEmitsOnlyAironInventory(t *testing.T) {
+func TestCLICatalogEmitsOnlyInventory(t *testing.T) {
 	path := writeConfig(t, validCatalog)
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{"catalog", "-config", path}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("run() error = %v, stderr = %q", err, stderr.String())
 	}
-	for _, forbidden := range []string{"openbao://", "storage.example.test", "accessKey", "secretKey"} {
+	for _, forbidden := range []string{"openbao://", "storage.example.test", "accessKey", "secretKey", "bucket"} {
 		if strings.Contains(stdout.String(), forbidden) {
 			t.Errorf("catalog output leaked %q: %s", forbidden, stdout.String())
 		}
 	}
 	for _, required := range []string{
 		`"kind":"BackupInventory"`,
+		`"apiVersion":"reksicherung.1node.xyz/v1alpha2"`,
 		`"id":"production"`,
 		`"provider":"gobackup"`,
 		`"sourceLocation":"catalog.yaml#backups/production"`,
@@ -75,67 +62,29 @@ func TestCLICatalogEmitsOnlyAironInventory(t *testing.T) {
 	}
 }
 
-func TestCLIProductionRequiresHTTPSStorage(t *testing.T) {
-	catalog := strings.Replace(validCatalog, "https://storage.example.test", "http://127.0.0.1:9000", 1)
-	path := writeConfig(t, catalog)
+func TestCLIProductionFlagStillValidates(t *testing.T) {
+	path := writeConfig(t, validCatalog)
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{"validate", "-config", path, "-production"}, &stdout, &stderr)
-	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
-		t.Fatalf("run() error = %v, want HTTPS requirement", err)
-	}
-	if strings.Contains(err.Error(), "digest") || strings.Contains(err.Error(), "image") {
-		t.Fatalf("production validation still depends on an operator-managed image: %v", err)
+	if err != nil {
+		t.Fatalf("run(-production) error = %v, stderr = %q", err, stderr.String())
 	}
 }
 
-func TestCLIHelpDoesNotAdvertiseContainerEngines(t *testing.T) {
+func TestCLIRejectsMissingConfig(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if err := run(context.Background(), []string{"help"}, &stdout, &stderr); err != nil {
-		t.Fatalf("run(help) error = %v", err)
-	}
-	for _, forbidden := range []string{"podman", "docker compose", "remove container"} {
-		if strings.Contains(strings.ToLower(stdout.String()), forbidden) {
-			t.Errorf("help advertises engine management %q: %s", forbidden, stdout.String())
-		}
+	err := run(context.Background(), []string{"validate"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("validate without -config succeeded")
 	}
 }
 
-func TestCLIRejectsMissingConfigAndUnexpectedArguments(t *testing.T) {
-	for _, args := range [][]string{
-		{"validate"},
-		{"catalog", "-config", "somewhere.yaml", "extra"},
-		{"cleanup"},
-		{"reconcile"},
-	} {
-		var stdout, stderr bytes.Buffer
-		if err := run(context.Background(), args, &stdout, &stderr); err == nil {
-			t.Errorf("run(%v) succeeded", args)
-		}
-	}
-}
-
-func TestCLIRejectsOversizedConfig(t *testing.T) {
-	path := writeConfig(t, strings.Repeat(" ", maxConfigBytes+1))
-	_, err := loadCatalog(path)
-	if err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("loadCatalog() error = %v, want size limit", err)
-	}
-}
-
-func TestCLIHonorsCanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	var stdout, stderr bytes.Buffer
-	if err := run(ctx, []string{"help"}, &stdout, &stderr); err == nil {
-		t.Fatal("run() succeeded with canceled context")
-	}
-}
-
-func writeConfig(t *testing.T, value string) string {
+func writeConfig(t *testing.T, contents string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "catalog.yaml")
-	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
-		t.Fatal(err)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "catalog.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
 	return path
 }

@@ -27,13 +27,13 @@ type artifactStore interface {
 }
 
 type restoreBackupArgs struct {
-	RunID          string `json:"run_id" jsonschema:"Unique Airon run ID; used to derive the only database name this operation can modify."`
+	RunID          string `json:"run_id" jsonschema:"Unique Reksicherung run ID; used to derive the only database name this operation can modify."`
 	ArtifactID     string `json:"artifact_id" jsonschema:"Opaque ID returned by the backup provider's stage tool."`
 	SourceDatabase string `json:"source_database" jsonschema:"Expected source database name recorded in the backup header."`
 }
 
 type runArgs struct {
-	RunID string `json:"run_id" jsonschema:"Unique Airon run ID used to derive the database name."`
+	RunID string `json:"run_id" jsonschema:"Unique Reksicherung run ID used to derive the database name."`
 }
 
 func (args *restoreBackupArgs) UnmarshalJSON(data []byte) error {

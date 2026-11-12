@@ -1,0 +1,6 @@
+{
+  "HOST": "sqlserver",
+  "PORT": "1433",
+  "USERNAME": "reksicherung_restore",
+  "PASSWORD": "ReplaceWithStrongPassword_123"
+}

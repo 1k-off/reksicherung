@@ -6,11 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/url"
 	"path"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/plan"
@@ -19,31 +16,28 @@ import (
 )
 
 const (
-	APIVersion = "reksicherung.io/v1alpha1"
+	APIVersion = "reksicherung.1node.xyz/v1alpha2"
 	Kind       = "BackupCatalog"
 )
 
-// Catalog is the human-maintained source of backup targets that Reksicherung
-// may inspect and restore.
+// Catalog is the human-maintained list of backup sources. Storage credentials
+// and coordinates are resolved from OpenBao by source id; they are not catalog
+// fields.
 type Catalog struct {
 	APIVersion string         `yaml:"apiVersion"`
 	Kind       string         `yaml:"kind"`
 	Backups    []BackupSource `yaml:"backups"`
 }
 
-// BackupSource describes one independently restorable SQL Server backup.
+// BackupSource describes one independently restorable SQL Server backup source.
 type BackupSource struct {
-	ID                    string            `yaml:"id"`
-	Provider              string            `yaml:"provider"`
-	RepositoryPasswordRef string            `yaml:"repositoryPasswordRef,omitempty"`
-	BackupName            string            `yaml:"backupName"`
-	BackupPath            string            `yaml:"backupPath,omitempty"`
-	Database              Database          `yaml:"database"`
-	Storage               S3Storage         `yaml:"storage"`
-	Selection             Selection         `yaml:"selection"`
-	Restore               Restore           `yaml:"restore"`
-	Validation            ValidationProfile `yaml:"validation,omitempty"`
-	Cleanup               string            `yaml:"cleanup"`
+	ID         string            `yaml:"id"`
+	Provider   string            `yaml:"provider"`
+	BackupPath string            `yaml:"backupPath,omitempty"`
+	Database   Database          `yaml:"database"`
+	Selection  Selection         `yaml:"selection"`
+	Validation ValidationProfile `yaml:"validation,omitempty"`
+	Cleanup    string            `yaml:"cleanup"`
 }
 
 type Database struct {
@@ -51,35 +45,9 @@ type Database struct {
 	Name string `yaml:"name"`
 }
 
-// S3Storage contains S3-compatible repository coordinates and references to
-// credentials. It intentionally has no fields for literal secret values.
-type S3Storage struct {
-	Type        string        `yaml:"type"`
-	Endpoint    string        `yaml:"endpoint,omitempty"`
-	Bucket      string        `yaml:"bucket"`
-	Region      string        `yaml:"region"`
-	Prefix      string        `yaml:"prefix,omitempty"`
-	Credentials S3Credentials `yaml:"credentials"`
-}
-
-type S3Credentials struct {
-	AccessKeyRef string `yaml:"accessKeyRef"`
-	SecretKeyRef string `yaml:"secretKeyRef"`
-}
-
 type Selection struct {
 	Policy string `yaml:"policy"`
 	ID     string `yaml:"id,omitempty"`
-}
-
-// Restore documents operator-side restore bounds. Image is optional advisory
-// metadata for the operator-managed SQL Server service; Reksicherung never
-// pulls or launches it.
-type Restore struct {
-	Image     string `yaml:"image,omitempty"`
-	CPUMilli  int    `yaml:"cpuMilli"`
-	MemoryMiB int    `yaml:"memoryMiB"`
-	Timeout   string `yaml:"timeout"`
 }
 
 // ValidationProfile enables optional AI-assisted semantic review and can
@@ -90,7 +58,7 @@ type ValidationProfile struct {
 }
 
 // Decode parses exactly one YAML document, rejects unknown fields, and
-// validates all references before returning the catalog.
+// validates the catalog.
 func Decode(data []byte) (Catalog, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
@@ -114,8 +82,8 @@ func Decode(data []byte) (Catalog, error) {
 	return catalog, nil
 }
 
-// Validate checks version, uniqueness, supported backends, and bounded
-// restore settings without resolving any secret references.
+// Validate checks version, uniqueness, and supported source fields without
+// resolving OpenBao material.
 func (catalog Catalog) Validate() error {
 	if catalog.APIVersion != APIVersion {
 		return fmt.Errorf("catalog apiVersion must be %q", APIVersion)
@@ -143,56 +111,31 @@ func (catalog Catalog) Validate() error {
 	return nil
 }
 
-// ValidateProduction applies deployment checks that cannot be represented by
-// local development validation. Service images and resource limits are managed
-// by the operator's deployment, not by Reksicherung.
+// ValidateProduction keeps the production entry point. Storage HTTPS is
+// enforced when OpenBao material is resolved, not from catalog fields.
 func (catalog Catalog) ValidateProduction() error {
-	if err := catalog.Validate(); err != nil {
-		return err
-	}
-	for i, backup := range catalog.Backups {
-		endpoint := backup.Storage.Endpoint
-		if endpoint == "" {
-			continue // The default AWS S3 endpoint uses HTTPS.
-		}
-		parsed, err := url.Parse(endpoint)
-		if err != nil || parsed.Scheme != "https" {
-			return fmt.Errorf("backups[%d]: production storage endpoint must use HTTPS", i)
-		}
-	}
-	return nil
+	return catalog.Validate()
 }
 
 func (backup BackupSource) validate() error {
-	if !validIdentifier(backup.ID) {
-		return errors.New("id must match [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}")
+	if !secrets.ValidSourceID(backup.ID) {
+		return errors.New("id must match [a-z0-9][a-z0-9-]{0,126}")
 	}
 	if backup.Provider != "gobackup" && backup.Provider != "restic" {
 		return errors.New("provider must be gobackup or restic")
 	}
 	if backup.Provider == "restic" {
-		if _, err := secrets.ParseReference(backup.RepositoryPasswordRef); err != nil {
-			return errors.New("repositoryPasswordRef must be a valid secret reference for Restic")
-		}
 		if err := validateResticBackupPath(backup.BackupPath); err != nil {
 			return err
 		}
-	} else if backup.RepositoryPasswordRef != "" {
-		return errors.New("repositoryPasswordRef is only valid for Restic")
 	} else if backup.BackupPath != "" {
 		return errors.New("backupPath is only valid for Restic")
-	}
-	if !validName(backup.BackupName) {
-		return errors.New("backupName must be a non-empty printable name of at most 256 characters")
 	}
 	if backup.Database.Type != "sqlserver" {
 		return errors.New("database.type must be sqlserver")
 	}
 	if len(backup.Database.Name) > 128 || !validName(backup.Database.Name) {
 		return errors.New("database.name must be a non-empty printable name of at most 128 characters")
-	}
-	if err := backup.Storage.validate(); err != nil {
-		return fmt.Errorf("storage: %w", err)
 	}
 	switch backup.Selection.Policy {
 	case "latest":
@@ -205,9 +148,6 @@ func (backup BackupSource) validate() error {
 		}
 	default:
 		return errors.New("selection.policy must be latest or id")
-	}
-	if err := backup.Restore.validate(); err != nil {
-		return fmt.Errorf("restore: %w", err)
 	}
 	if err := backup.Validation.validate(); err != nil {
 		return fmt.Errorf("validation: %w", err)
@@ -255,112 +195,12 @@ func (profile ValidationProfile) validate() error {
 	return nil
 }
 
-func (storage S3Storage) validate() error {
-	if storage.Type != "s3" {
-		return errors.New("type must be s3")
-	}
-	if !validBucket(storage.Bucket) {
-		return errors.New("bucket must be a valid S3 bucket name")
-	}
-	if !validName(storage.Region) {
-		return errors.New("region must be a non-empty printable name")
-	}
-	if storage.Prefix != "" {
-		for _, segment := range strings.Split(storage.Prefix, "/") {
-			if segment == "" || segment == "." || segment == ".." {
-				return errors.New("prefix must not contain empty, dot, or parent path segments")
-			}
-		}
-		if strings.HasPrefix(storage.Prefix, "/") || strings.Contains(storage.Prefix, "\\") {
-			return errors.New("prefix must be a relative object key prefix")
-		}
-	}
-	if storage.Endpoint != "" {
-		endpoint, err := url.Parse(storage.Endpoint)
-		if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" ||
-			endpoint.Fragment != "" || (endpoint.Path != "" && endpoint.Path != "/") ||
-			(endpoint.Scheme != "https" && endpoint.Scheme != "http") {
-			return errors.New("endpoint must be an http(s) URL without credentials, query, or fragment")
-		}
-		if endpoint.Scheme == "http" && !isLoopbackHost(endpoint.Hostname()) {
-			return errors.New("non-loopback S3 endpoints must use https")
-		}
-	}
-	if _, err := secrets.ParseReference(storage.Credentials.AccessKeyRef); err != nil {
-		return errors.New("credentials.accessKeyRef must be a valid secret reference")
-	}
-	if _, err := secrets.ParseReference(storage.Credentials.SecretKeyRef); err != nil {
-		return errors.New("credentials.secretKeyRef must be a valid secret reference")
-	}
-	return nil
-}
-
-func (restore Restore) validate() error {
-	if restore.Image != "" {
-		if strings.TrimSpace(restore.Image) != restore.Image || strings.ContainsAny(restore.Image, "\r\n\t ") {
-			return errors.New("image must be a printable image reference without whitespace")
-		}
-		if strings.HasPrefix(restore.Image, "-") {
-			return errors.New("image must not look like a runtime command-line option")
-		}
-		for _, r := range restore.Image {
-			if unicode.IsControl(r) {
-				return errors.New("image must be a printable image reference")
-			}
-		}
-	}
-	if restore.CPUMilli < 250 || restore.CPUMilli > 16000 {
-		return errors.New("cpuMilli must be between 250 and 16000")
-	}
-	if restore.MemoryMiB < 1024 || restore.MemoryMiB > 65536 {
-		return errors.New("memoryMiB must be between 1024 and 65536")
-	}
-	timeout, err := time.ParseDuration(restore.Timeout)
-	if err != nil || timeout < time.Minute || timeout > 24*time.Hour {
-		return errors.New("timeout must be between 1m and 24h")
-	}
-	return nil
-}
-
-func validIdentifier(value string) bool {
-	if value == "" || len(value) > 128 {
-		return false
-	}
-	for i, r := range value {
-		alphaNum := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
-		if (i == 0 && !alphaNum) || (i > 0 && !alphaNum && r != '.' && r != '_' && r != '-') {
-			return false
-		}
-	}
-	return true
-}
-
 func validName(value string) bool {
 	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value {
 		return false
 	}
 	for _, r := range value {
 		if unicode.IsControl(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func validBucket(value string) bool {
-	if len(value) < 3 || len(value) > 63 || value[0] == '.' || value[0] == '-' ||
-		value[len(value)-1] == '.' || value[len(value)-1] == '-' || strings.Contains(value, "..") ||
-		net.ParseIP(value) != nil {
-		return false
-	}
-	for _, label := range strings.Split(value, ".") {
-		if label == "" || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, r := range label {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-				continue
-			}
 			return false
 		}
 	}
@@ -386,12 +226,4 @@ func validTableReference(table string) bool {
 		}
 	}
 	return true
-}
-
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

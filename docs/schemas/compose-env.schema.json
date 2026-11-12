@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/compose-env.schema.json",
+  "title": "Compose bootstrap environment",
+  "description": "Allowed keys for examples/compose/.env. SQL host/user/password live in OpenBao, not here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "MSSQL_SA_PASSWORD",
+    "REKSICHERUNG_OPENBAO_ADDR",
+    "REKSICHERUNG_OPENBAO_TOKEN"
+  ],
+  "properties": {
+    "MSSQL_SA_PASSWORD": { "type": "string", "minLength": 8 },
+    "REKSICHERUNG_OPENBAO_ADDR": { "type": "string" },
+    "REKSICHERUNG_OPENBAO_TOKEN": { "type": "string", "minLength": 1 },
+    "REKSICHERUNG_OPENBAO_PLAINTEXT": {
+      "type": "string",
+      "enum": ["1"],
+      "description": "Lab-only: allow http:// OpenBao to non-loopback hosts (compose service DNS)"
+    },
+    "REKSICHERUNG_ARTIFACT_STAGE_DIR": {
+      "type": "string",
+      "description": "Optional; defaults to /var/lib/reksicherung/artifacts"
+    },
+    "REKSICHERUNG_SQLSERVER_BACKUP_DIR": {
+      "type": "string",
+      "description": "Optional; defaults to /var/opt/mssql/backup"
+    },
+    "REKSICHERUNG_SQLSERVER_DATA_DIR": {
+      "type": "string",
+      "description": "Optional; defaults to /var/opt/mssql/data"
+    },
+    "REKSICHERUNG_ARTIFACT_MAX_BYTES": { "type": "string", "pattern": "^[0-9]+$" }
+  }
+}

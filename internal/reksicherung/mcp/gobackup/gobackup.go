@@ -150,8 +150,14 @@ func (service *Service) List(ctx context.Context) ([]Backup, error) {
 			if strings.HasSuffix(object.Key, "/") {
 				continue
 			}
+			relativeID := strings.TrimPrefix(object.Key, service.config.Prefix)
+			// GoBackup writes operational state under .gobackup-state/; it is not
+			// a restoreable archive and must not win Latest() by mtime.
+			if strings.HasPrefix(relativeID, ".gobackup-state/") {
+				continue
+			}
 			objects = append(objects, Backup{
-				ID:           strings.TrimPrefix(object.Key, service.config.Prefix),
+				ID:           relativeID,
 				Size:         object.Size,
 				LastModified: object.LastModified,
 			})

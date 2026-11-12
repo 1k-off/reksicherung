@@ -2,7 +2,7 @@
 
 Lists snapshots and streams one selected file from a Restic repository through
 a local `restic` executable. It does not create containers, resolve secrets, or
-drive the higher-level Airon workflow.
+drive the higher-level restore-check workflow.
 
 ## Constraints
 

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/openbao-sqlserver.schema.json",
+  "title": "OpenBao SQL Server connection KV",
+  "description": "KV v2 data at secret/reksicherung/sqlserver. Shared by restore, inspect, and cleanup.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["HOST", "USERNAME", "PASSWORD"],
+  "properties": {
+    "HOST": { "type": "string", "minLength": 1, "description": "SQL Server hostname or IP" },
+    "PORT": {
+      "type": "string",
+      "pattern": "^[0-9]{1,5}$",
+      "description": "Optional; defaults to 1433"
+    },
+    "USERNAME": { "type": "string", "minLength": 1 },
+    "PASSWORD": { "type": "string", "minLength": 8 }
+  }
+}

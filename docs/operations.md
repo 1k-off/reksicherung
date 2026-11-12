@@ -2,16 +2,23 @@
 
 ## Production readiness checklist
 
-1. Build and promote MCP/CLI images from `deploy/docker/` with pinned base digests.
-2. Deploy OpenBao with persistent storage, unseal strategy, sealed backups, and a
-   least-privilege token (or AppRole) for Reksicherung only.
-3. Deploy an isolated SQL Server restore instance on a network that cannot reach
-   production databases; create a dedicated restore login.
-4. Mount shared artifact and backup volumes into provider + restore MCP processes.
-5. Run `cleanup-reconciler` continuously against the run registry volume.
-6. Configure Airon with the skill, MCP servers, and protected secret env.
-7. Validate with a synthetic backup E2E (`go test -tags=e2e ./test/e2e/...` when
-   fixtures/services are available) before enabling cron.
+1. Follow `docs/inputs.md` and `skills/reksicherung-bootstrap/SKILL.md`.
+2. Build and promote MCP/CLI images from `deploy/docker/` with pinned base digests.
+3. Deploy OpenBao with persistent storage, unseal strategy, sealed backups, and a
+   least-privilege token (or AppRole) for Reksicherung only. Write
+   `secret/reksicherung/defaults`, per-source KV, and
+   `secret/reksicherung/sqlserver` (`HOST`/`USERNAME`/`PASSWORD`, optional
+   `PORT`) per `docs/schemas/openbao-source-kv.md`.
+4. Deploy an isolated SQL Server restore instance on a network that cannot reach
+   production databases; create a dedicated restore login matching OpenBao.
+5. Mount shared artifact and backup volumes into provider + restore MCP processes.
+6. Run `cleanup-reconciler` continuously against the run registry volume.
+7. Point any orchestrator (or manual operator workflow) at MCP servers with
+   OpenBao bootstrap env only, plus thin `BackupCatalog` / inventory — no
+   per-backup S3 keys in compose `.env`. Optional Airon example:
+   `examples/airon/`.
+8. Validate with a synthetic backup E2E (`go test -tags=e2e ./test/e2e/...` when
+   fixtures/services are available) before enabling schedules.
 
 ## OpenBao
 
@@ -30,19 +37,14 @@ for the process lifetime and restart processes on rotation.
 
 ## Evidence and audit
 
-- Airon JSON run log: retain as orchestration evidence (steps, tool calls, token
-  usage when reported).
+- Orchestrator logs (if any): retain as orchestration evidence.
 - Reksicherung evidence: JSON Lines via `internal/reksicherung/evidence.Writer`
   under an operator-managed path such as
   `/var/lib/reksicherung/evidence/<run-id>.jsonl` (mode 0600).
-- Correlate by Reksicherung run ID; store optional Airon run ID when available.
+- Correlate by Reksicherung run ID; store optional `external_run_id` when the
+  orchestrator supplies MCP `_meta` `1node.xyz/external-run-id` or the tool arg.
 - Retention: operator policy (recommended ≥ 90 days for restore-check evidence).
 - Redaction: no secrets, DSNs, or unnecessary row-level business data.
-
-Until Airon injects run IDs via MCP `_meta` (see
-`docs/airon-integration-follow-up.md`), pass correlation IDs explicitly in the
-workflow plan where possible and keep Airon logs in a durable location Airon
-already owns.
 
 ## Cleanup
 

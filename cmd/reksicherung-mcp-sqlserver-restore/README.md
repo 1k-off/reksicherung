@@ -27,7 +27,8 @@ identity access to production databases.
 ## Shared-volume contract
 
 The provider MCP server stages a resolved artifact as an opaque ID in
-`REKSICHERUNG_ARTIFACT_STAGE_DIR`. This directory must be pre-created and
+`REKSICHERUNG_ARTIFACT_STAGE_DIR` (optional; default
+`/var/lib/reksicherung/artifacts`). This directory must be pre-created and
 mounted at the same path in the GoBackup MCP and restore MCP containers. The
 staged source artifact is retained; the restore MCP does not delete it.
 
@@ -49,27 +50,21 @@ both kinds.
 
 Required environment:
 
-- `REKSICHERUNG_SQLSERVER_ADDRESS`: sqlcmd address such as `tcp:sqlserver,1433`.
-- `REKSICHERUNG_SQLSERVER_RESTORE_USERNAME`: dedicated restore login.
-- `REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF`: OpenBao reference to the
-  login password.
 - `REKSICHERUNG_OPENBAO_ADDR` and `REKSICHERUNG_OPENBAO_TOKEN`.
-- `REKSICHERUNG_ARTIFACT_STAGE_DIR`: shared provider/restore staging mount.
-- `REKSICHERUNG_SQLSERVER_BACKUP_DIR`: shared restore/SQL Server backup mount.
-- `REKSICHERUNG_SQLSERVER_DATA_DIR`: SQL Server's data directory.
 
-Optional:
+SQL connection is resolved from OpenBao `secret/reksicherung/sqlserver`
+(`HOST`, `USERNAME`, `PASSWORD`; optional `PORT`, default `1433`). See
+`docs/schemas/openbao-sqlserver.schema.json`.
 
-- `REKSICHERUNG_SQLCMD`: sqlcmd executable, default `sqlcmd`.
-- `REKSICHERUNG_SQLPACKAGE`: sqlpackage executable, default `sqlpackage`.
+Optional path/tool overrides:
+
+- `REKSICHERUNG_ARTIFACT_STAGE_DIR`: default `/var/lib/reksicherung/artifacts`.
+- `REKSICHERUNG_SQLSERVER_BACKUP_DIR`: default `/var/opt/mssql/backup`.
+- `REKSICHERUNG_SQLSERVER_DATA_DIR`: default `/var/opt/mssql/data`.
+- `REKSICHERUNG_SQLCMD`: default `sqlcmd`.
+- `REKSICHERUNG_SQLPACKAGE`: default `sqlpackage`.
 - `REKSICHERUNG_ARTIFACT_MAX_BYTES`: maximum staged/native backup size, default
-  200 GiB and hard-capped at 1 TiB. Set a smaller value for test environments
-  with a known disk budget.
-
-The SQL Server connection uses sqlcmd's mandatory TLS mode and certificate
-verification; no trust-server-certificate override is enabled. Configure a
-certificate whose name matches the address and ensure the container trusts its
-issuer.
+  200 GiB and hard-capped at 1 TiB.
 
 ## Example Compose volumes
 

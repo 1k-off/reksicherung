@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/backup-catalog.v1alpha2.schema.json",
+  "title": "BackupCatalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "backups"],
+  "properties": {
+    "apiVersion": { "const": "reksicherung.1node.xyz/v1alpha2" },
+    "kind": { "const": "BackupCatalog" },
+    "backups": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": { "$ref": "#/$defs/backupSource" }
+    }
+  },
+  "$defs": {
+    "backupSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "provider", "database", "selection", "cleanup"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,126}$",
+          "description": "Stable source_id; OpenBao path key under secret/reksicherung/sources/<id>"
+        },
+        "provider": { "enum": ["gobackup", "restic"] },
+        "backupPath": {
+          "type": "string",
+          "description": "Required for restic: absolute path inside the snapshot"
+        },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "name"],
+          "properties": {
+            "type": { "const": "sqlserver" },
+            "name": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy"],
+          "properties": {
+            "policy": { "enum": ["latest", "id"] },
+            "id": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        },
+        "cleanup": { "enum": ["delete", "hold_for_review"] },
+        "validation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "semanticReview": { "type": "boolean" },
+            "expectedEmptyTables": {
+              "type": "array",
+              "items": { "type": "string", "pattern": "^[^.]{1,128}\\.[^.]{1,128}$" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

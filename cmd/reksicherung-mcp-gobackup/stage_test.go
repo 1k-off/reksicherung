@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"strings"
@@ -30,7 +31,7 @@ func TestBackupStagerResolvesNestedArchiveWithoutWritingMemberPaths(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := stager.Stage(context.Background(), "run-123/backup")
+	result, err := stager.Stage(context.Background(), "run-123/backup", "")
 	if err != nil {
 		t.Fatalf("Stage() error = %v", err)
 	}
@@ -52,6 +53,40 @@ func TestBackupStagerResolvesNestedArchiveWithoutWritingMemberPaths(t *testing.T
 	}
 	if len(entries) != 1 || strings.Contains(entries[0].Name(), "backup") {
 		t.Fatalf("stage directory contains unexpected member paths: %#v", entries)
+	}
+}
+
+func TestBackupStagerAmbiguousRequiresMemberPath(t *testing.T) {
+	zipBytes := makeZipMembers(t, map[string][]byte{
+		"shop/db-a.bak": []byte("aaa"),
+		"shop/db-b.bak": []byte("bbb"),
+	})
+	stageStore, err := staging.New(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stager, err := newBackupStager(&fakeArtifactOpener{data: zipBytes}, stageStore, artifact.Limits{
+		MaxInputBytes: 1 << 20, MaxExpandedBytes: 1 << 20, MaxTemporaryBytes: 2 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := stager.ListCandidates(context.Background(), "run/archive.zip")
+	if err != nil || len(listed.Candidates) != 2 {
+		t.Fatalf("ListCandidates() = %#v, err %v", listed, err)
+	}
+	_, err = stager.Stage(context.Background(), "run/archive.zip", "")
+	var ambiguous *ambiguousArchiveError
+	if !errors.As(err, &ambiguous) || len(ambiguous.Candidates) != 2 {
+		t.Fatalf("Stage() error = %v, want ambiguous with 2 candidates", err)
+	}
+	result, err := stager.Stage(context.Background(), "run/archive.zip", "shop/db-b.bak")
+	if err != nil {
+		t.Fatalf("Stage(member_path) error = %v", err)
+	}
+	if result.Kind != staging.KindBAK || result.Size != 3 {
+		t.Fatalf("staged = %#v", result)
 	}
 }
 
@@ -83,14 +118,21 @@ func makeTar(t *testing.T, name string, data []byte) []byte {
 
 func makeZip(t *testing.T, name string, data []byte) []byte {
 	t.Helper()
+	return makeZipMembers(t, map[string][]byte{name: data})
+}
+
+func makeZipMembers(t *testing.T, members map[string][]byte) []byte {
+	t.Helper()
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)
-	member, err := writer.Create(name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := member.Write(data); err != nil {
-		t.Fatal(err)
+	for name, data := range members {
+		member, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := member.Write(data); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)

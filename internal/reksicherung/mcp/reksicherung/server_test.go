@@ -16,7 +16,7 @@ import (
 func TestRestoreCheckToolRoundTrip(t *testing.T) {
 	service := &fakeService{result: ServiceResult{
 		RunID:      "run-123",
-		AironRunID: "airon-456",
+		ExternalRunID: "ext-456",
 		Databases: []DatabaseResult{{
 			DatabaseID: "billing-prod",
 			Status:     workflow.OutcomePassed,
@@ -45,7 +45,7 @@ func TestRestoreCheckToolRoundTrip(t *testing.T) {
 			"selection": map[string]any{"all": false, "database_ids": []string{"billing-prod"}},
 			"ordering":  "sequential", "max_parallelism": 1, "error_handling": "continue",
 		},
-		"airon_run_id": "airon-456",
+		"external_run_id": "ext-456",
 	}
 	result := callTool(t, client, args)
 	if result.IsError {
@@ -54,7 +54,7 @@ func TestRestoreCheckToolRoundTrip(t *testing.T) {
 	var got Result
 	decodeResult(t, result, &got)
 	want := Result{
-		RunID: "run-123", AironRunID: "airon-456",
+		RunID: "run-123", ExternalRunID: "ext-456",
 		Databases: []DatabaseResult{{
 			DatabaseID: "billing-prod",
 			Status:     workflow.OutcomePassed,
@@ -75,7 +75,7 @@ func TestRestoreCheckToolRoundTrip(t *testing.T) {
 		t.Fatalf("service calls = %d, want 1", service.calls)
 	}
 	gotRequest := service.request
-	if gotRequest.AironRunID != "airon-456" ||
+	if gotRequest.ExternalRunID != "ext-456" ||
 		gotRequest.Plan.Selection.All ||
 		len(gotRequest.Plan.Selection.DatabaseIDs) != 1 ||
 		gotRequest.Plan.Selection.DatabaseIDs[0] != "billing-prod" ||
@@ -86,10 +86,10 @@ func TestRestoreCheckToolRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRestoreCheckUsesAironRunIDMetadata(t *testing.T) {
+func TestRestoreCheckUsesExternalRunIDMetadata(t *testing.T) {
 	service := &fakeService{result: ServiceResult{
 		RunID:      "run-123",
-		AironRunID: "airon-789",
+		ExternalRunID: "ext-789",
 		Databases: []DatabaseResult{{
 			DatabaseID: "db-1",
 			Status:     workflow.OutcomePassed,
@@ -103,20 +103,20 @@ func TestRestoreCheckUsesAironRunIDMetadata(t *testing.T) {
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "restore_check",
 		Arguments: validArgs(),
-		Meta:      mcp.Meta{AironRunIDMetaKey: "airon-789"},
+		Meta:      mcp.Meta{ExternalRunIDMetaKey: "ext-789"},
 	})
 	if err != nil || result.IsError {
 		t.Fatalf("CallTool() error = %v, result = %#v", err, result)
 	}
 	var got Result
 	decodeResult(t, result, &got)
-	if got.AironRunID != "airon-789" {
-		t.Fatalf("result Airon run ID = %q, want metadata value", got.AironRunID)
+	if got.ExternalRunID != "ext-789" {
+		t.Fatalf("result external run ID = %q, want metadata value", got.ExternalRunID)
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
-	if service.request.AironRunID != "airon-789" {
-		t.Fatalf("service Airon run ID = %q, want metadata value", service.request.AironRunID)
+	if service.request.ExternalRunID != "ext-789" {
+		t.Fatalf("service external run ID = %q, want metadata value", service.request.ExternalRunID)
 	}
 }
 
@@ -150,20 +150,20 @@ func TestRestoreCheckSchemaAndDecoderAgreeOnAllSelection(t *testing.T) {
 	}
 }
 
-func TestRestoreCheckRejectsConflictingAironRunIDMetadata(t *testing.T) {
+func TestRestoreCheckRejectsConflictingExternalRunIDMetadata(t *testing.T) {
 	service := &fakeService{result: ServiceResult{RunID: "run-123"}}
 	client, cleanup := connectTestClient(t, service)
 	defer cleanup()
 
 	args := validArgs()
-	args["airon_run_id"] = "airon-arg"
+	args["external_run_id"] = "ext-arg"
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "restore_check",
 		Arguments: args,
-		Meta:      mcp.Meta{AironRunIDMetaKey: "airon-meta"},
+		Meta:      mcp.Meta{ExternalRunIDMetaKey: "ext-meta"},
 	})
 	if err == nil && !result.IsError {
-		t.Fatal("CallTool() accepted conflicting Airon run IDs")
+		t.Fatal("CallTool() accepted conflicting external run IDs")
 	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
@@ -316,7 +316,7 @@ func TestRestoreCheckDoesNotExposeUntrustedServiceData(t *testing.T) {
 func TestRestoreCheckBoundsServiceResult(t *testing.T) {
 	service := &fakeService{result: ServiceResult{
 		RunID:      "run-123",
-		AironRunID: "airon-456",
+		ExternalRunID: "ext-456",
 		Databases: []DatabaseResult{{
 			DatabaseID: "db-1",
 			Status:     workflow.OutcomePassed,
@@ -333,7 +333,7 @@ func TestRestoreCheckBoundsServiceResult(t *testing.T) {
 	}
 }
 
-func TestRestoreCheckRejectsUnpersistedAironCorrelationID(t *testing.T) {
+func TestRestoreCheckRejectsUnpersistedExternalCorrelationID(t *testing.T) {
 	service := &fakeService{result: ServiceResult{
 		RunID: "run-123",
 		Databases: []DatabaseResult{{
@@ -347,12 +347,12 @@ func TestRestoreCheckRejectsUnpersistedAironCorrelationID(t *testing.T) {
 	defer cleanup()
 
 	args := validArgs()
-	args["airon_run_id"] = "airon-requested"
+	args["external_run_id"] = "ext-requested"
 	result := callTool(t, client, args)
 	if !result.IsError {
-		t.Fatal("restore_check succeeded without a persisted Airon correlation ID")
+		t.Fatal("restore_check succeeded without a persisted external correlation ID")
 	}
-	assertNoLeak(t, result, "airon-requested")
+	assertNoLeak(t, result, "ext-requested")
 }
 
 func connectTestClient(t *testing.T, service Service) (*mcp.ClientSession, func()) {

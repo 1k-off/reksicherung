@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/openbao-source.schema.json",
+  "title": "OpenBao per-source KV",
+  "description": "KV v2 data at secret/reksicherung/sources/<source_id>.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"],
+  "properties": {
+    "S3_ACCESS_KEY_ID": { "type": "string", "minLength": 1 },
+    "S3_SECRET_ACCESS_KEY": { "type": "string", "minLength": 1 },
+    "S3_ENDPOINT": { "type": "string" },
+    "S3_REGION": { "type": "string" },
+    "S3_BUCKET": { "type": "string" },
+    "S3_PATH_PREFIX": {
+      "type": "string",
+      "description": "Required for gobackup; must end with /"
+    },
+    "RESTIC_REPOSITORY": { "type": "string" },
+    "RESTIC_PASSWORD": { "type": "string" }
+  }
+}

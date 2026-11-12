@@ -13,34 +13,60 @@ import (
 	"unicode/utf8"
 
 	gobackup "github.com/1k-off/reksicherung/internal/reksicherung/mcp/gobackup"
+	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 	"github.com/1k-off/reksicherung/internal/reksicherung/storage"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const maxListResults = 8
 
-type archiveService interface {
-	List(context.Context) ([]gobackup.Backup, error)
-	Latest(context.Context) (gobackup.Backup, error)
-	Select(context.Context, string) (gobackup.Backup, error)
+type multiSourceArchives interface {
+	List(context.Context, string) ([]gobackup.Backup, error)
+	Latest(context.Context, string) (gobackup.Backup, error)
+	Select(context.Context, string, string) (gobackup.Backup, error)
 }
 
-type stagingService interface {
-	Stage(context.Context, string) (stagedArtifact, error)
+type multiSourceStaging interface {
+	Stage(context.Context, string, string, string) (stagedArtifact, error)
+	ListCandidates(context.Context, string, string) (archiveCandidateList, error)
 }
 
 type listArgs struct {
-	Limit int `json:"limit,omitempty" jsonschema:"Maximum number of metadata records to return (1 to 8; defaults to 8)."`
+	SourceID string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+	Limit    int    `json:"limit,omitempty" jsonschema:"Maximum number of metadata records to return (1 to 8; defaults to 8)."`
 }
 
-type latestArgs struct{}
+type latestArgs struct {
+	SourceID string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+}
 
 type selectArgs struct {
-	ID string `json:"id" jsonschema:"Exact backup ID returned by list; object contents are never read."`
+	SourceID string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+	ID       string `json:"id" jsonschema:"Exact backup ID returned by list; object contents are never read."`
 }
 
 type stageArgs struct {
-	ID string `json:"id" jsonschema:"Exact backup ID returned by list or select."`
+	SourceID   string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+	ID         string `json:"id" jsonschema:"Exact backup ID returned by list or select."`
+	MemberPath string `json:"member_path,omitempty" jsonschema:"Optional exact archive member path from gobackup_list_archive_candidates when multiple .bak/.bacpac files exist."`
+}
+
+type listCandidatesArgs struct {
+	SourceID string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+	ID       string `json:"id" jsonschema:"Exact backup ID returned by list or select."`
+}
+
+// stageToolResult is the gobackup_stage_artifact output. On success artifact
+// fields are set. On ambiguity, code is "ambiguous_archive" and candidates are
+// populated (IsError=true on the CallToolResult).
+type stageToolResult struct {
+	ArtifactID string             `json:"artifact_id,omitempty"`
+	Kind       string             `json:"kind,omitempty"`
+	Size       int64              `json:"size,omitempty"`
+	Code       string             `json:"code,omitempty"`
+	Message    string             `json:"message,omitempty"`
+	Candidates []archiveCandidate `json:"candidates,omitempty"`
+	Truncated  bool               `json:"truncated,omitempty"`
 }
 
 func (args *listArgs) UnmarshalJSON(data []byte) error {
@@ -63,6 +89,11 @@ func (args *stageArgs) UnmarshalJSON(data []byte) error {
 	return decodeStrictJSON(data, (*input)(args))
 }
 
+func (args *listCandidatesArgs) UnmarshalJSON(data []byte) error {
+	type input listCandidatesArgs
+	return decodeStrictJSON(data, (*input)(args))
+}
+
 func decodeStrictJSON(data []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -80,7 +111,7 @@ func decodeStrictJSON(data []byte, target any) error {
 }
 
 type backupOutput struct {
-	ID           string `json:"id" jsonschema:"Backup ID relative to the configured prefix."`
+	ID           string `json:"id" jsonschema:"Backup ID relative to the source prefix."`
 	Size         int64  `json:"size" jsonschema:"Object size in bytes."`
 	LastModified string `json:"last_modified" jsonschema:"Storage LastModified timestamp in RFC3339Nano format."`
 }
@@ -90,20 +121,23 @@ type listOutput struct {
 	Truncated bool           `json:"truncated" jsonschema:"True when this bounded response omitted additional matching archives."`
 }
 
-func newMCPServer(service archiveService, stagingServices ...stagingService) *mcp.Server {
+func newMCPServer(service multiSourceArchives, stagingServices ...multiSourceStaging) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reksicherung-gobackup",
 		Version: "0.1.0",
 	}, &mcp.ServerOptions{
-		Instructions: "Read-only GoBackup archive discovery scoped to the configured S3 bucket and prefix. Tools return object metadata only and never expose archive bytes.",
+		Instructions: "GoBackup archive discovery per catalog source_id. Credentials and prefixes are resolved from OpenBao. Tools return object metadata only and never expose archive bytes.",
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gobackup_list",
-		Description: "List newest-first GoBackup archive metadata under the configured prefix. Returns at most 8 records and indicates if more were omitted.",
+		Description: "List newest-first GoBackup archive metadata for one source_id. Returns at most 8 records and indicates if more were omitted.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args listArgs) (*mcp.CallToolResult, listOutput, error) {
+		if !secrets.ValidSourceID(args.SourceID) {
+			return nil, listOutput{}, errors.New("invalid source_id")
+		}
 		limit := args.Limit
 		if limit == 0 {
 			limit = maxListResults
@@ -111,7 +145,7 @@ func newMCPServer(service archiveService, stagingServices ...stagingService) *mc
 		if limit < 1 || limit > maxListResults {
 			return nil, listOutput{}, errors.New("limit must be between 1 and 8")
 		}
-		backups, err := service.List(ctx)
+		backups, err := service.List(ctx, args.SourceID)
 		if err != nil {
 			return nil, listOutput{}, safeToolError(err)
 		}
@@ -124,10 +158,13 @@ func newMCPServer(service archiveService, stagingServices ...stagingService) *mc
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gobackup_latest",
-		Description: "Return metadata for the newest GoBackup archive under the configured prefix. Does not read archive contents.",
+		Description: "Return metadata for the newest GoBackup archive for one source_id. Does not read archive contents.",
 		Annotations: readOnlyToolAnnotations(),
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ latestArgs) (*mcp.CallToolResult, backupOutput, error) {
-		backup, err := service.Latest(ctx)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args latestArgs) (*mcp.CallToolResult, backupOutput, error) {
+		if !secrets.ValidSourceID(args.SourceID) {
+			return nil, backupOutput{}, errors.New("invalid source_id")
+		}
+		backup, err := service.Latest(ctx, args.SourceID)
 		if err != nil {
 			return nil, backupOutput{}, safeToolError(err)
 		}
@@ -136,13 +173,16 @@ func newMCPServer(service archiveService, stagingServices ...stagingService) *mc
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "gobackup_select",
-		Description: "Look up metadata for one exact backup ID under the configured prefix. Does not read archive contents.",
+		Description: "Look up metadata for one exact backup ID under one source_id. Does not read archive contents.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args selectArgs) (*mcp.CallToolResult, backupOutput, error) {
+		if !secrets.ValidSourceID(args.SourceID) {
+			return nil, backupOutput{}, errors.New("invalid source_id")
+		}
 		if !validBackupID(args.ID) {
 			return nil, backupOutput{}, errors.New("invalid backup ID")
 		}
-		backup, err := service.Select(ctx, args.ID)
+		backup, err := service.Select(ctx, args.SourceID, args.ID)
 		if err != nil {
 			return nil, backupOutput{}, safeToolError(err)
 		}
@@ -152,23 +192,62 @@ func newMCPServer(service archiveService, stagingServices ...stagingService) *mc
 	if len(stagingServices) != 0 && stagingServices[0] != nil {
 		destructive, idempotent, openWorld := false, false, true
 		mcp.AddTool(server, &mcp.Tool{
-			Name:        "gobackup_stage_artifact",
-			Description: "Read the exact selected GoBackup object, resolve nested ZIP/tar/gzip wrappers, and stage one .bak or BACPAC file in the configured shared artifact directory. Returns only an opaque artifact ID, kind, and size; artifact bytes and archive member paths are not exposed.",
+			Name: "gobackup_list_archive_candidates",
+			Description: "Download one GoBackup archive for source_id and list terminal .bak/.bacpac member paths " +
+				"(metadata only). Use when staging reports ambiguous_archive, then pass member_path to gobackup_stage_artifact.",
+			Annotations: readOnlyToolAnnotations(),
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, args listCandidatesArgs) (*mcp.CallToolResult, archiveCandidateList, error) {
+			if !secrets.ValidSourceID(args.SourceID) {
+				return nil, archiveCandidateList{}, errors.New("invalid source_id")
+			}
+			if !validBackupID(args.ID) {
+				return nil, archiveCandidateList{}, errors.New("invalid backup ID")
+			}
+			result, err := stagingServices[0].ListCandidates(ctx, args.SourceID, args.ID)
+			if err != nil {
+				return nil, archiveCandidateList{}, errors.New("GoBackup archive candidate listing failed")
+			}
+			return nil, result, nil
+		})
+
+		mcp.AddTool(server, &mcp.Tool{
+			Name: "gobackup_stage_artifact",
+			Description: "Read the selected GoBackup object for source_id, resolve nested wrappers, and stage one .bak or BACPAC file. " +
+				"When multiple terminal members exist, returns ambiguous_archive with candidates; retry with member_path.",
 			Annotations: &mcp.ToolAnnotations{
 				ReadOnlyHint:    false,
 				DestructiveHint: &destructive,
 				IdempotentHint:  idempotent,
 				OpenWorldHint:   &openWorld,
 			},
-		}, func(ctx context.Context, _ *mcp.CallToolRequest, args stageArgs) (*mcp.CallToolResult, stagedArtifact, error) {
+		}, func(ctx context.Context, _ *mcp.CallToolRequest, args stageArgs) (*mcp.CallToolResult, stageToolResult, error) {
+			if !secrets.ValidSourceID(args.SourceID) {
+				return nil, stageToolResult{}, errors.New("invalid source_id")
+			}
 			if !validBackupID(args.ID) {
-				return nil, stagedArtifact{}, errors.New("invalid backup ID")
+				return nil, stageToolResult{}, errors.New("invalid backup ID")
 			}
-			result, err := stagingServices[0].Stage(ctx, args.ID)
+			if args.MemberPath != "" && !validMemberPath(args.MemberPath) {
+				return nil, stageToolResult{}, errors.New("invalid member_path")
+			}
+			result, err := stagingServices[0].Stage(ctx, args.SourceID, args.ID, args.MemberPath)
 			if err != nil {
-				return nil, stagedArtifact{}, errors.New("GoBackup artifact staging failed")
+				var ambiguous *ambiguousArchiveError
+				if errors.As(err, &ambiguous) {
+					return &mcp.CallToolResult{IsError: true}, stageToolResult{
+						Code:       "ambiguous_archive",
+						Message:    "archive contains multiple candidate artifacts; pass member_path",
+						Candidates: ambiguous.Candidates,
+						Truncated:  ambiguous.Truncated,
+					}, nil
+				}
+				return nil, stageToolResult{}, errors.New("GoBackup artifact staging failed")
 			}
-			return nil, result, nil
+			return nil, stageToolResult{
+				ArtifactID: result.ArtifactID,
+				Kind:       result.Kind,
+				Size:       result.Size,
+			}, nil
 		})
 	}
 	return server

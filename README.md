@@ -2,28 +2,30 @@
 
 Automated backup restoreability checks for SQL Server backups (GoBackup and Restic) stored in S3-compatible object storage.
 
-Reksicherung is a set of MCP servers, an Airon skill, catalog utilities, an optional GoBackup config generator, and a durable database-cleanup reconciler. It does **not** create, start, or remove containers. Operators provision MCP services and the SQL Server restore target; Airon schedules and drives the multi-step restore-check workflow.
+Reksicherung is a set of MCP servers, skills, catalog utilities, an optional GoBackup config generator, and a durable database-cleanup reconciler. It does **not** create, start, or remove containers. Operators provision MCP services and the SQL Server restore target. Any MCP-capable orchestrator (for example Airon — see `examples/airon/`) or a human operator can drive the restore-check workflow. Airon is not a dependency.
+
+**AI-first:** all expected inputs are registered in [`docs/inputs.md`](docs/inputs.md) with machine-readable schemas under [`docs/schemas/`](docs/schemas/).
+
+Module path: `github.com/1k-off/reksicherung`. Catalog API: `reksicherung.1node.xyz/v1alpha2`.
 
 ## Components
 
 | Binary | Role |
 | --- | --- |
-| `reksicherung` | Validate catalogs, emit Airon inventory, cleanup held DBs, reconcile expired cleanup leases |
-| `reksicherung-mcp-gobackup` | Discover/stage GoBackup archives from S3 |
-| `reksicherung-mcp-restic` | Discover/stage files from a Restic repository |
-| `reksicherung-mcp-sqlserver-restore` | Restore staged `.bak`/`.bacpac` into an operator-managed SQL Server; integrity check; drop run-scoped DB |
+| `reksicherung` | Validate catalogs, emit inventory, cleanup held DBs, reconcile expired cleanup leases |
+| `reksicherung-mcp-gobackup` | Discover/stage GoBackup archives per `source_id` (OpenBao) |
+| `reksicherung-mcp-restic` | Discover/stage files from Restic repos per `source_id` (OpenBao) |
+| `reksicherung-mcp-sqlserver-restore` | Restore staged `.bak`/`.bacpac`; integrity check; drop run-scoped DB |
 | `reksicherung-mcp-sqlserver` | Bounded read-only schema/query tools for AI semantic review |
-
-Module path: `github.com/1k-off/reksicherung`.
 
 ## Production deploy
 
-1. Copy [`examples/compose/.env.example`](examples/compose/.env.example) → `.env` and set real secret references / storage coordinates.
-2. Follow [`docs/operations.md`](docs/operations.md): OpenBao init/unseal, KV secrets, isolated SQL restore login, image digests.
-3. Build and start: `docker compose -f examples/compose/docker-compose.yml build && docker compose -f examples/compose/docker-compose.yml up -d openbao sqlserver cleanup-reconciler`
-4. Configure Airon with [`examples/airon/restore-check.yaml`](examples/airon/restore-check.yaml) and [`skills/reksicherung-restore-check/SKILL.md`](skills/reksicherung-restore-check/SKILL.md).
-5. Keep evidence per [`docs/evidence.md`](docs/evidence.md).
-6. Before enabling cron, run the release-gate E2E when fixtures are available: `go test -tags=e2e ./test/e2e/...`
+1. Follow skill [`skills/reksicherung-bootstrap/SKILL.md`](skills/reksicherung-bootstrap/SKILL.md).
+2. Copy [`examples/compose/.env.example`](examples/compose/.env.example) → `.env` (bootstrap only).
+3. OpenBao KV: defaults + `sources/<id>` + sqlserver ([`docs/schemas/openbao-source-kv.md`](docs/schemas/openbao-source-kv.md)).
+4. Thin catalog ([`examples/catalog.yaml`](examples/catalog.yaml)); `reksicherung validate` / `catalog`.
+5. Drive MCP tools manually or via an orchestrator job ([`examples/airon/restore-check.yaml`](examples/airon/restore-check.yaml) is one optional binding) + restore-check skill.
+6. E2E when fixtures available: `go test -tags=e2e ./test/e2e/...`
 
 ## Development
 
@@ -32,11 +34,8 @@ go test ./...
 go vet ./...
 ```
 
-Integration/E2E tests that need live SQL Server / S3 / OpenBao use build tags (`integration`, `e2e`) and operator-started services; they never mutate source backup objects.
-
 ## Spec and decisions
 
-- [`SPEC.md`](SPEC.md) — product boundaries and acceptance criteria
-- [`docs/decisions/`](docs/decisions/) — catalog/inventory schema decisions
-- [`docs/operations.md`](docs/operations.md) — production checklist
-- [`docs/airon-integration-follow-up.md`](docs/airon-integration-follow-up.md) — optional Airon `_meta` / log handoff improvements (Airon repo only)
+- [`SPEC.md`](SPEC.md) — product boundaries
+- [`docs/inputs.md`](docs/inputs.md) — input registry for AI agents
+- [`docs/decisions/`](docs/decisions/) — ADRs

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/backup-inventory.v1alpha2.schema.json",
+  "title": "BackupInventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "backups"],
+  "properties": {
+    "apiVersion": { "const": "reksicherung.1node.xyz/v1alpha2" },
+    "kind": { "const": "BackupInventory" },
+    "backups": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sourceLocation", "provider", "database", "selection", "checks"],
+        "properties": {
+          "id": { "type": "string" },
+          "sourceLocation": { "type": "string" },
+          "provider": { "enum": ["gobackup", "restic"] },
+          "database": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "name"],
+            "properties": {
+              "type": { "const": "sqlserver" },
+              "name": { "type": "string" }
+            }
+          },
+          "selection": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["policy"],
+            "properties": {
+              "policy": { "enum": ["latest", "id"] },
+              "id": { "type": "string" }
+            }
+          },
+          "checks": {
+            "type": "array",
+            "items": { "enum": ["restore", "sqlserver-integrity", "semantic-review"] }
+          },
+          "expectedEmptyTables": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,9 +1,10 @@
-# Airon integration follow-up
+# Airon integration follow-up (Airon repo only)
 
-This is a copy-ready implementation task for an Airon maintainer or coding
-agent. It records integration constraints identified while building
-Reksicherung; it does not authorize changes to Airon from the Reksicherung
-repository.
+This lives under `examples/airon/` because it is **not** part of the
+Reksicherung runtime contract. It is a copy-ready task for an Airon maintainer
+or coding agent. It does not authorize changes to Airon from the Reksicherung
+repository. Reksicherung already accepts optional correlation via
+`external_run_id` / MCP `_meta` `1node.xyz/external-run-id`.
 
 ## Prompt
 

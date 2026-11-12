@@ -190,7 +190,7 @@ func TestConcurrentUpdateAllowsOnlyOneWriterForRevision(t *testing.T) {
 		go func(index int) {
 			defer wait.Done()
 			_, err := store.Update(context.Background(), record.ID, record.Revision, func(next *Record) error {
-				next.AironRunID = fmt.Sprintf("airon-%d", index)
+				next.ExternalRunID = fmt.Sprintf("ext-%d", index)
 				return nil
 			})
 			mu.Lock()

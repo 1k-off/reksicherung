@@ -1,5 +1,6 @@
-# Example Airon job fragment. Paths and secret injection are operator-specific.
-# Airon expands ${ENV} before starting MCP children. Keep env_passthrough false.
+# Optional Airon binding of I-ORCHESTRATOR-JOB (not required by Reksicherung).
+# SQL host/user/password come from OpenBao secret/reksicherung/sqlserver
+# (HOST, PORT?, USERNAME, PASSWORD). Inspect only needs the per-run database name.
 
 runtime:
   log_inputs: false
@@ -10,43 +11,34 @@ mcp_servers:
     command: /usr/local/bin/reksicherung-mcp-gobackup
     env_passthrough: false
     env:
-      REKSICHERUNG_GOBACKUP_S3_ENDPOINT: ${REKSICHERUNG_GOBACKUP_S3_ENDPOINT}
-      REKSICHERUNG_GOBACKUP_S3_REGION: ${REKSICHERUNG_GOBACKUP_S3_REGION}
-      REKSICHERUNG_GOBACKUP_S3_BUCKET: ${REKSICHERUNG_GOBACKUP_S3_BUCKET}
-      REKSICHERUNG_GOBACKUP_S3_PREFIX: ${REKSICHERUNG_GOBACKUP_S3_PREFIX}
-      REKSICHERUNG_GOBACKUP_S3_ACCESS_KEY_REF: ${REKSICHERUNG_GOBACKUP_S3_ACCESS_KEY_REF}
-      REKSICHERUNG_GOBACKUP_S3_SECRET_KEY_REF: ${REKSICHERUNG_GOBACKUP_S3_SECRET_KEY_REF}
       REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
-      REKSICHERUNG_ARTIFACT_STAGE_DIR: /var/lib/reksicherung/artifacts
-      REKSICHERUNG_ARTIFACT_MAX_BYTES: "214748364800"
+
+  - name: reksicherung_restic
+    transport: stdio
+    command: /usr/local/bin/reksicherung-mcp-restic
+    env_passthrough: false
+    env:
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
 
   - name: reksicherung_sqlserver_restore
     transport: stdio
     command: /usr/local/bin/reksicherung-mcp-sqlserver-restore
     env_passthrough: false
     env:
-      REKSICHERUNG_SQLSERVER_ADDRESS: tcp:sqlserver,1433
-      REKSICHERUNG_SQLSERVER_RESTORE_USERNAME: ${REKSICHERUNG_SQLSERVER_RESTORE_USERNAME}
-      REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF: ${REKSICHERUNG_SQLSERVER_RESTORE_PASSWORD_REF}
       REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
-      REKSICHERUNG_ARTIFACT_STAGE_DIR: /var/lib/reksicherung/artifacts
-      REKSICHERUNG_SQLSERVER_BACKUP_DIR: /var/opt/mssql/backup
-      REKSICHERUNG_SQLSERVER_DATA_DIR: /var/opt/mssql/data
-      REKSICHERUNG_SQLCMD: sqlcmd
-      REKSICHERUNG_SQLPACKAGE: sqlpackage
 
   - name: reksicherung_sqlserver_inspect
     transport: stdio
     command: /usr/local/bin/reksicherung-mcp-sqlserver
     env_passthrough: false
     env:
-      REKSICHERUNG_SQLSERVER_DSN: ${REKSICHERUNG_SQLSERVER_DSN}
+      REKSICHERUNG_OPENBAO_ADDR: ${REKSICHERUNG_OPENBAO_ADDR}
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      # Set per run to the restored database name (e.g. reksicherung_<hash>).
       REKSICHERUNG_SQLSERVER_DATABASE: ${REKSICHERUNG_SQLSERVER_DATABASE}
 
 skills:
   - path: skills/reksicherung-restore-check/SKILL.md
-
-# Schedule via Airon/cron. Prompt should instruct the model to follow the skill
-# sequence and never invent PASS when required tools failed or were skipped.

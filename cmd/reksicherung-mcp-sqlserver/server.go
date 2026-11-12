@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	sqlserver "github.com/1k-off/reksicherung/internal/reksicherung/mcp/sqlserver"
+	restoresql "github.com/1k-off/reksicherung/internal/reksicherung/restore/sqlserver"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -17,21 +18,29 @@ type inspectionService interface {
 	DescribeTable(context.Context, sqlserver.TableRef) (sqlserver.TableDescription, error)
 	Validate(context.Context, sqlserver.ValidationQuery) (sqlserver.ValidationResult, error)
 	CheckIntegrity(context.Context) (sqlserver.IntegrityResult, error)
+	ScopeToDatabase(string) (inspectionService, error)
 }
 
 type listTablesArgs struct {
 	Schema *string `json:"schema,omitempty" jsonschema:"Optional schema name; omit to list tables in all schemas."`
+	RunID  *string `json:"run_id,omitempty" jsonschema:"Optional restore run_id; when set, inspect the run-scoped database instead of the process default (required when REKSICHERUNG_SQLSERVER_DATABASE=master)."`
 }
 
 type describeTableArgs struct {
-	Schema string `json:"schema" jsonschema:"Schema containing the table."`
-	Table  string `json:"table" jsonschema:"Table whose column metadata should be inspected."`
+	Schema string  `json:"schema" jsonschema:"Schema containing the table."`
+	Table  string  `json:"table" jsonschema:"Table whose column metadata should be inspected."`
+	RunID  *string `json:"run_id,omitempty" jsonschema:"Optional restore run_id; selects the run-scoped database when the process default is master."`
 }
 
 type validateTableArgs struct {
-	Schema string `json:"schema" jsonschema:"Schema containing the table."`
-	Table  string `json:"table" jsonschema:"Table to inspect."`
-	Limit  int    `json:"limit" jsonschema:"Maximum total rows to count (1 to 100)."`
+	Schema string  `json:"schema" jsonschema:"Schema containing the table."`
+	Table  string  `json:"table" jsonschema:"Table to inspect."`
+	Limit  int     `json:"limit" jsonschema:"Maximum total rows to count (1 to 100)."`
+	RunID  *string `json:"run_id,omitempty" jsonschema:"Optional restore run_id; selects the run-scoped database when the process default is master."`
+}
+
+type checkIntegrityArgs struct {
+	RunID *string `json:"run_id,omitempty" jsonschema:"Optional restore run_id; selects the run-scoped database when the process default is master."`
 }
 
 // Custom unmarshaling makes the typed handlers reject unknown JSON properties.
@@ -49,6 +58,11 @@ func (args *describeTableArgs) UnmarshalJSON(data []byte) error {
 
 func (args *validateTableArgs) UnmarshalJSON(data []byte) error {
 	type input validateTableArgs
+	return decodeStrictJSON(data, (*input)(args))
+}
+
+func (args *checkIntegrityArgs) UnmarshalJSON(data []byte) error {
+	type input checkIntegrityArgs
 	return decodeStrictJSON(data, (*input)(args))
 }
 
@@ -104,12 +118,23 @@ type checkIntegrityOutput struct {
 	Completed bool `json:"completed" jsonschema:"True when SQL Server completed DBCC CHECKDB without a command error."`
 }
 
+func resolveInspectDatabase(defaultDatabase string, runID *string) (string, error) {
+	if runID == nil || *runID == "" {
+		return defaultDatabase, nil
+	}
+	name, err := restoresql.DatabaseNameForRun(*runID)
+	if err != nil {
+		return "", errors.New("invalid tool arguments")
+	}
+	return name, nil
+}
+
 func newMCPServer(service inspectionService, database string) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reksicherung-sqlserver",
 		Version: "0.1.0",
 	}, &mcp.ServerOptions{
-		Instructions: "Read-only SQL Server restore inspection. Results contain schema metadata, bounded aggregates, or DBCC CHECKDB execution status, never row values. Only the configured target database is available.",
+		Instructions: "Read-only SQL Server restore inspection. Results contain schema metadata, bounded aggregates, or DBCC CHECKDB execution status, never row values. Pass run_id to target the restore-scoped database when the process default is master.",
 		// SDK diagnostics are disabled so protocol internals cannot accidentally
 		// place prompts or tool arguments in logs.
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -117,14 +142,22 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlserver_list_tables",
-		Description: "List at most 200 user tables in the configured database, optionally restricted to one schema. Returns names and truncation metadata only.",
+		Description: "List at most 200 user tables in the target database, optionally restricted to one schema. Returns names and truncation metadata only. Pass run_id to select the restore-scoped database.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args listTablesArgs) (*mcp.CallToolResult, listTablesOutput, error) {
+		target, err := resolveInspectDatabase(database, args.RunID)
+		if err != nil {
+			return nil, listTablesOutput{}, err
+		}
+		scoped, err := service.ScopeToDatabase(target)
+		if err != nil {
+			return nil, listTablesOutput{}, safeToolError(err)
+		}
 		schema := ""
 		if args.Schema != nil {
 			schema = *args.Schema
 		}
-		result, err := service.ListTables(ctx, database, schema)
+		result, err := scoped.ListTables(ctx, target, schema)
 		if err != nil {
 			return nil, listTablesOutput{}, safeToolError(err)
 		}
@@ -137,11 +170,19 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlserver_describe_table",
-		Description: "Return bounded SQL Server column metadata for a table in the configured database. Does not return row values.",
+		Description: "Return bounded SQL Server column metadata for a table in the target database. Does not return row values. Pass run_id to select the restore-scoped database.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args describeTableArgs) (*mcp.CallToolResult, describeTableOutput, error) {
-		description, err := service.DescribeTable(ctx, sqlserver.TableRef{
-			Database: database,
+		target, err := resolveInspectDatabase(database, args.RunID)
+		if err != nil {
+			return nil, describeTableOutput{}, err
+		}
+		scoped, err := service.ScopeToDatabase(target)
+		if err != nil {
+			return nil, describeTableOutput{}, safeToolError(err)
+		}
+		description, err := scoped.DescribeTable(ctx, sqlserver.TableRef{
+			Database: target,
 			Schema:   args.Schema,
 			Table:    args.Table,
 		})
@@ -165,12 +206,20 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlserver_validate_table",
-		Description: "Count total rows in one table, capped at 100. Caller-supplied predicates and row values are not accepted; only the aggregate count and truncation flag are returned.",
+		Description: "Count total rows in one table, capped at 100. Caller-supplied predicates and row values are not accepted; only the aggregate count and truncation flag are returned. Pass run_id to select the restore-scoped database.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args validateTableArgs) (*mcp.CallToolResult, validateTableOutput, error) {
-		result, err := service.Validate(ctx, sqlserver.ValidationQuery{
+		target, err := resolveInspectDatabase(database, args.RunID)
+		if err != nil {
+			return nil, validateTableOutput{}, err
+		}
+		scoped, err := service.ScopeToDatabase(target)
+		if err != nil {
+			return nil, validateTableOutput{}, safeToolError(err)
+		}
+		result, err := scoped.Validate(ctx, sqlserver.ValidationQuery{
 			Table: sqlserver.TableRef{
-				Database: database,
+				Database: target,
 				Schema:   args.Schema,
 				Table:    args.Table,
 			},
@@ -188,10 +237,18 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "sqlserver_check_integrity",
-		Description: "Run a full, target-scoped DBCC CHECKDB with fixed non-repair options and a bounded timeout. Returns whether the command completed; SQL Server diagnostic messages are not returned.",
+		Description: "Run a full, target-scoped DBCC CHECKDB with fixed non-repair options and a bounded timeout. Returns whether the command completed; SQL Server diagnostic messages are not returned. Pass run_id to select the restore-scoped database.",
 		Annotations: readOnlyToolAnnotations(),
-	}, func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, checkIntegrityOutput, error) {
-		result, err := service.CheckIntegrity(ctx)
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, args checkIntegrityArgs) (*mcp.CallToolResult, checkIntegrityOutput, error) {
+		target, err := resolveInspectDatabase(database, args.RunID)
+		if err != nil {
+			return nil, checkIntegrityOutput{}, err
+		}
+		scoped, err := service.ScopeToDatabase(target)
+		if err != nil {
+			return nil, checkIntegrityOutput{}, safeToolError(err)
+		}
+		result, err := scoped.CheckIntegrity(ctx)
 		if err != nil {
 			return nil, checkIntegrityOutput{}, safeToolError(err)
 		}

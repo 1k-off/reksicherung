@@ -13,7 +13,6 @@ func TestFromConfigProducesDeterministicSecretFreeInventory(t *testing.T) {
 	source := validSource(t)
 	second := source.Backups[0]
 	second.ID = "another-source"
-	second.BackupName = "another-backup"
 	source.Backups = append(source.Backups, second)
 
 	inventory, err := FromConfig(source, "configs/catalog.yaml")
@@ -52,6 +51,8 @@ func TestFromConfigProducesDeterministicSecretFreeInventory(t *testing.T) {
 		"accessKey",
 		"secretKey",
 		"password",
+		"bucket",
+		"backupName",
 	} {
 		if strings.Contains(string(firstJSON), forbidden) {
 			t.Errorf("inventory leaked forbidden field/value %q: %s", forbidden, firstJSON)
@@ -69,7 +70,7 @@ func TestFromConfigProducesDeterministicSecretFreeInventory(t *testing.T) {
 
 func TestFromConfigRejectsInvalidCatalog(t *testing.T) {
 	source := validSource(t)
-	source.Backups[0].Restore.MemoryMiB = 0
+	source.Backups[0].ID = "BAD_ID"
 	if _, err := FromConfig(source, "catalog.yaml"); err == nil {
 		t.Fatal("FromConfig() accepted invalid source")
 	}
@@ -97,32 +98,17 @@ func TestMarshalRejectsInvalidInventory(t *testing.T) {
 
 func validSource(t *testing.T) config.Catalog {
 	t.Helper()
-	const yaml = `apiVersion: reksicherung.io/v1alpha1
+	const yaml = `apiVersion: reksicherung.1node.xyz/v1alpha2
 kind: BackupCatalog
 backups:
   - id: source
     provider: restic
-    repositoryPasswordRef: openbao://secret/reksicherung/restic#repository-password
-    backupName: production
     backupPath: /var/opt/mssql/backup/production.bak
     database:
       type: sqlserver
       name: App
-    storage:
-      type: s3
-      endpoint: https://storage.example.test
-      bucket: backups
-      region: eu-central
-      credentials:
-        accessKeyRef: openbao://secret/reksicherung/s3#access-key
-        secretKeyRef: openbao://secret/reksicherung/s3#secret-key
     selection:
       policy: latest
-    restore:
-      image: mcr.microsoft.com/mssql/server:2022-latest
-      cpuMilli: 1000
-      memoryMiB: 2048
-      timeout: 1h
     validation:
       semanticReview: true
       expectedEmptyTables:

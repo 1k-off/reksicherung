@@ -1,10 +1,10 @@
 # Run registry
 
 The run registry stores non-secret lifecycle metadata in a bbolt database. It
-tracks the Reksicherung run ID, optional Airon correlation ID, current phase,
-verdict, run-scoped restored database name, cleanup policy, and renewable
-cleanup lease. Credentials, prompts, SQL result data, and backup contents do
-not belong here.
+tracks the Reksicherung run ID, optional external orchestrator correlation ID,
+current phase, verdict, run-scoped restored database name, cleanup policy, and
+renewable cleanup lease. Credentials, prompts, SQL result data, and backup
+contents do not belong here.
 
 Open one registry database per active Reksicherung service process. bbolt locks
 the file, so a second process cannot silently race the first writer. Transactions

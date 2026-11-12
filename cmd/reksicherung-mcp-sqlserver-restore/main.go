@@ -64,15 +64,15 @@ func run(ctx context.Context, getenv func(string) string, stdin io.ReadCloser, s
 	if err != nil {
 		return errors.New("could not initialize configured OpenBao secret provider")
 	}
-	password, err := resolvePassword(ctx, provider, config.passwordRef)
+	sqlMaterial, err := secrets.ResolveSQLServer(ctx, provider)
 	if err != nil {
-		return errors.New("could not resolve configured SQL Server restore-password secret")
+		return errors.New("could not resolve SQL Server connection from OpenBao")
 	}
-	defer clear(password)
+	defer sqlMaterial.Clear()
 	operations, err := sqlserver.NewRemote(nil, sqlserver.RemoteConfig{
-		Server:          config.address,
-		Username:        config.username,
-		Password:        string(password),
+		Server:          sqlMaterial.SQLCmdAddress(),
+		Username:        sqlMaterial.Username,
+		Password:        string(sqlMaterial.Password),
 		BackupDirectory: config.backupDirectory,
 		DataDirectory:   config.dataDirectory,
 		SQLCmd:          config.sqlCmd,
@@ -86,20 +86,7 @@ func run(ctx context.Context, getenv func(string) string, stdin io.ReadCloser, s
 	return serve(ctx, operations, artifacts, stdin, stdout)
 }
 
-func resolvePassword(ctx context.Context, provider secrets.SecretProvider, raw string) ([]byte, error) {
-	reference, err := secrets.ParseReference(raw)
-	if err != nil {
-		return nil, errors.New("invalid secret reference")
-	}
-	value, err := provider.Resolve(ctx, reference)
-	if err != nil || len(value) == 0 {
-		clear(value)
-		return nil, errors.New("secret resolution failed")
-	}
-	return value, nil
-}
-
-func serve(ctx context.Context, service restoreService, artifacts artifactStore, stdin io.ReadCloser, stdout io.WriteCloser) error {
+func serve(ctx context.Context, service remoteService, artifacts *staging.Store, stdin io.ReadCloser, stdout io.WriteCloser) error {
 	server := newRestoreMCPServer(service, artifacts)
 	if err := server.Run(ctx, &mcp.IOTransport{
 		Reader: newRestoreFrameReader(stdin, maxMCPFrameBytes),

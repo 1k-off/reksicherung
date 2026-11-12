@@ -6,8 +6,7 @@ listener "tcp" {
 }
 
 storage "file" {
-  path = "/vault/file"
+  path = "/openbao/file"
 }
 
-api_addr     = "http://127.0.0.1:8200"
-disable_mlock = true
+api_addr = "http://127.0.0.1:8200"

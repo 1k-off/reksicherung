@@ -59,7 +59,7 @@ Usage:
 
 Commands:
   validate   Validate a versioned backup catalog
-  catalog    Write the secret-free Airon inventory as JSON to stdout
+  catalog    Write the secret-free backup inventory as JSON to stdout
   cleanup    Drop a hold_for_review run-scoped database (services stay running)
   reconcile  Retry expired automatic database cleanup leases
 

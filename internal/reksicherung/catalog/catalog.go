@@ -1,5 +1,6 @@
 // Package catalog converts validated Reksicherung configuration into a
-// secret-free inventory suitable for passing to Airon as a JSON input value.
+// secret-free inventory suitable for passing to an orchestrator or operator
+// as a JSON input value.
 package catalog
 
 import (
@@ -14,7 +15,7 @@ import (
 )
 
 const (
-	APIVersion = "reksicherung.io/v1alpha1"
+	APIVersion = "reksicherung.1node.xyz/v1alpha2"
 	Kind       = "BackupInventory"
 )
 
@@ -30,9 +31,7 @@ type Entry struct {
 	ID                  string    `json:"id"`
 	SourceLocation      string    `json:"sourceLocation"`
 	Provider            string    `json:"provider"`
-	BackupName          string    `json:"backupName"`
 	Database            Database  `json:"database"`
-	Storage             Storage   `json:"storage"`
 	Selection           Selection `json:"selection"`
 	Checks              []string  `json:"checks"`
 	ExpectedEmptyTables []string  `json:"expectedEmptyTables,omitempty"`
@@ -41,12 +40,6 @@ type Entry struct {
 type Database struct {
 	Type string `json:"type"`
 	Name string `json:"name"`
-}
-
-type Storage struct {
-	Type   string `json:"type"`
-	Bucket string `json:"bucket"`
-	Region string `json:"region"`
 }
 
 type Selection struct {
@@ -74,15 +67,9 @@ func FromConfig(source config.Catalog, sourceLocation string) (Inventory, error)
 			ID:             backup.ID,
 			SourceLocation: sourceLocation + "#backups/" + backup.ID,
 			Provider:       backup.Provider,
-			BackupName:     backup.BackupName,
 			Database: Database{
 				Type: backup.Database.Type,
 				Name: backup.Database.Name,
-			},
-			Storage: Storage{
-				Type:   backup.Storage.Type,
-				Bucket: backup.Storage.Bucket,
-				Region: backup.Storage.Region,
 			},
 			Selection: Selection{
 				Policy: backup.Selection.Policy,
@@ -122,7 +109,7 @@ func validSourceLocation(location string) bool {
 	return true
 }
 
-// Marshal returns compact deterministic JSON suitable for an Airon string
+// Marshal returns compact deterministic JSON suitable as an orchestrator string
 // input variable. The JSON contains no endpoint or secret-reference fields.
 func (inventory Inventory) Marshal() ([]byte, error) {
 	if inventory.APIVersion != APIVersion || inventory.Kind != Kind || len(inventory.Backups) == 0 {

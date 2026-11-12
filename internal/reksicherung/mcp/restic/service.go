@@ -10,7 +10,7 @@ import (
 	"io"
 	"os/exec"
 	"regexp"
-	"strconv"
+	"sort"
 	"time"
 )
 
@@ -24,7 +24,7 @@ var (
 
 const (
 	defaultTimeout   = 15 * time.Second
-	maxTimeout       = 1 * time.Minute
+	maxTimeout       = 2 * time.Minute
 	defaultMaxCount  = 50
 	hardMaxCount     = 100
 	maxCommandOutput = 4 << 20
@@ -115,12 +115,13 @@ func NewWithRunner(runner Runner, options Options) (*Service, error) {
 }
 
 // ListSnapshots returns at most limit snapshots from the configured
-// repository. It requests one extra snapshot to determine truncation.
+// repository, newest first. Restic's --latest is per host/path group and can
+// return far more than limit; list all (bounded by MaxSnapshots+1) and truncate.
 func (s *Service) ListSnapshots(ctx context.Context, limit int) (SnapshotList, error) {
 	if ctx == nil || limit < 1 || limit > s.options.MaxSnapshots {
 		return SnapshotList{}, ErrInvalidInput
 	}
-	output, err := s.run(ctx, []string{"snapshots", "--json", "--latest", strconv.Itoa(limit + 1)})
+	output, err := s.run(ctx, []string{"snapshots", "--json"})
 	if err != nil {
 		return SnapshotList{}, err
 	}
@@ -128,13 +129,16 @@ func (s *Service) ListSnapshots(ctx context.Context, limit int) (SnapshotList, e
 	if err != nil {
 		return SnapshotList{}, ErrFailed
 	}
-	if len(records) > limit+1 {
+	if len(records) > s.options.MaxSnapshots+1 {
 		return SnapshotList{}, ErrFailed
 	}
 	snapshots, err := snapshotMetadata(records)
 	if err != nil {
 		return SnapshotList{}, ErrFailed
 	}
+	sort.Slice(snapshots, func(i, j int) bool {
+		return snapshots[i].Time.After(snapshots[j].Time)
+	})
 	truncated := len(snapshots) > limit
 	if truncated {
 		snapshots = snapshots[:limit]
@@ -316,7 +320,8 @@ func validEnvironmentEntry(entry string) (string, bool) {
 			switch name {
 			case "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
 				"AWS_DEFAULT_REGION", "AWS_REGION", "B2_ACCOUNT_ID", "B2_ACCOUNT_KEY",
-				"AZURE_ACCOUNT_NAME", "AZURE_ACCOUNT_KEY":
+				"AZURE_ACCOUNT_NAME", "AZURE_ACCOUNT_KEY",
+				"RESTIC_CACHE_DIR", "XDG_CACHE_HOME":
 				return name, true
 			default:
 				return "", false

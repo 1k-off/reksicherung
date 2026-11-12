@@ -1,0 +1,22 @@
+apiVersion: reksicherung.1node.xyz/v1alpha2
+kind: BackupCatalog
+backups:
+  - id: shop-production
+    provider: gobackup
+    database:
+      type: sqlserver
+      name: Shop
+    selection:
+      policy: latest
+    cleanup: delete
+    validation:
+      semanticReview: true
+  - id: reporting-production
+    provider: restic
+    backupPath: /var/opt/mssql/backup/reporting.bak
+    database:
+      type: sqlserver
+      name: Reporting
+    selection:
+      policy: latest
+    cleanup: delete

@@ -59,7 +59,7 @@ var (
 // business data must be stored elsewhere and excluded from the run registry.
 type Record struct {
 	ID             string        `json:"id"`
-	AironRunID     string        `json:"airon_run_id,omitempty"`
+	ExternalRunID     string        `json:"external_run_id,omitempty"`
 	Status         Status        `json:"status"`
 	Verdict        Verdict       `json:"verdict"`
 	CleanupMode    CleanupMode   `json:"cleanup_mode"`
@@ -97,8 +97,8 @@ func (record Record) Validate() error {
 	if !runIDPattern.MatchString(record.ID) {
 		return fmt.Errorf("%w: invalid run ID", ErrInvalidRecord)
 	}
-	if record.AironRunID != "" && !runIDPattern.MatchString(record.AironRunID) {
-		return fmt.Errorf("%w: invalid Airon run ID", ErrInvalidRecord)
+	if record.ExternalRunID != "" && !runIDPattern.MatchString(record.ExternalRunID) {
+		return fmt.Errorf("%w: invalid external run ID", ErrInvalidRecord)
 	}
 	switch record.Status {
 	case StatusCreated, StatusPreparing, StatusRestoring, StatusValidating, StatusFinalizing, StatusFinished:

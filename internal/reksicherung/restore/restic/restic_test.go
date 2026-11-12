@@ -118,10 +118,14 @@ func TestOpenBackupFileSelectsSnapshotAndStreamsOneExactPath(t *testing.T) {
 		"--repo", "s3:https://objects.example.test/backups",
 		"dump", oldSnapshotID, "/var/backups/sql server/db.bak",
 	}
-	if got := runner.invocations[len(runner.invocations)-1].Args; !reflect.DeepEqual(got, wantArgs) {
+	dump := runner.invocations[len(runner.invocations)-1]
+	if got := dump.Args; !reflect.DeepEqual(got, wantArgs) {
 		t.Fatalf("dump argv = %#v, want %#v", got, wantArgs)
 	}
-	if strings.Contains(strings.Join(runner.invocations[len(runner.invocations)-1].Args, "\x00"), testSecret) {
+	if dump.MaxOutputBytes != maxStreamBytes {
+		t.Fatalf("dump stream limit = %d, want MaxStreamBytes %d", dump.MaxOutputBytes, maxStreamBytes)
+	}
+	if strings.Contains(strings.Join(dump.Args, "\x00"), testSecret) {
 		t.Fatal("Restic password appeared in dump argv")
 	}
 }
@@ -293,7 +297,6 @@ func TestParseSnapshotsRejectsMalformedOrUnexpectedJSON(t *testing.T) {
 		{name: "empty ID", data: `[{"id":"","time":"2024-01-01T00:00:00Z"}]`},
 		{name: "short ID", data: `[{"id":"abc","time":"2024-01-01T00:00:00Z"}]`},
 		{name: "invalid timestamp", data: `[{"id":"` + oldSnapshotID + `","time":"yesterday"}]`},
-		{name: "unknown field", data: `[{"id":"` + oldSnapshotID + `","time":"2024-01-01T00:00:00Z","password":"secret"}]`},
 		{name: "duplicate key", data: `[{"id":"` + oldSnapshotID + `","id":"` + newSnapshotID + `","time":"2024-01-01T00:00:00Z"}]`},
 		{name: "duplicate snapshot ID", data: `[{"id":"` + oldSnapshotID + `","time":"2024-01-01T00:00:00Z"},{"id":"` + oldSnapshotID + `","time":"2024-01-02T00:00:00Z"}]`},
 		{name: "trailing value", data: `[] []`},
@@ -306,6 +309,15 @@ func TestParseSnapshotsRejectsMalformedOrUnexpectedJSON(t *testing.T) {
 				t.Fatalf("parseSnapshots() error = %v, want ErrInvalidSnapshotOutput", err)
 			}
 		})
+	}
+}
+
+func TestParseSnapshotsIgnoresForwardCompatibleFields(t *testing.T) {
+	t.Parallel()
+	data := `[{"id":"` + oldSnapshotID + `","time":"2024-01-01T00:00:00Z","parent":"x","summary":{"files_new":1},"excludes":["a"]}]`
+	snapshots, err := parseSnapshots([]byte(data))
+	if err != nil || len(snapshots) != 1 || snapshots[0].ID != oldSnapshotID {
+		t.Fatalf("parseSnapshots() = %#v, %v", snapshots, err)
 	}
 }
 

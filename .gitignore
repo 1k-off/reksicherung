@@ -38,3 +38,6 @@ Thumbs.db
 !.env.example
 *.pem
 *.key
+
+examples/catalog.yaml
+bcai.code-workspace

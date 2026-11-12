@@ -9,24 +9,24 @@ import (
 	"log/slog"
 
 	resticservice "github.com/1k-off/reksicherung/internal/reksicherung/mcp/restic"
+	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type listSnapshotsArgs struct {
-	Limit int `json:"limit" jsonschema:"Maximum number of snapshots to return (1 to 100)."`
+	SourceID string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+	Limit    int    `json:"limit" jsonschema:"Maximum number of snapshots to return (1 to 100)."`
 }
 
 type selectSnapshotArgs struct {
-	ID string `json:"id" jsonschema:"Full snapshot ID returned by restic_list_snapshots."`
+	SourceID string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
+	ID       string `json:"id" jsonschema:"Full snapshot ID returned by restic_list_snapshots."`
 }
 
 type stageResticArgs struct {
+	SourceID   string `json:"source_id" jsonschema:"Catalog source_id; OpenBao path secret/reksicherung/sources/<source_id>."`
 	SnapshotID string `json:"snapshot_id" jsonschema:"Full snapshot ID returned by restic_list_snapshots."`
 	BackupPath string `json:"backup_path" jsonschema:"Exact absolute backup file path within the snapshot; no wildcards or directories."`
-}
-
-type resticStagingService interface {
-	Stage(context.Context, string, string) (resticStagedArtifact, error)
 }
 
 func (args *listSnapshotsArgs) UnmarshalJSON(data []byte) error {
@@ -72,21 +72,24 @@ type listSnapshotsOutput struct {
 	Truncated bool             `json:"truncated" jsonschema:"True when additional snapshots were omitted."`
 }
 
-func newMCPServer(instance service, stagers ...resticStagingService) *mcp.Server {
+func newMCPServer(instance multiSourceRestic, stagers ...multiSourceResticStaging) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "reksicherung-restic",
 		Version: "0.1.0",
 	}, &mcp.ServerOptions{
-		Instructions: "Read-only Restic snapshot discovery. Only bounded snapshot identifiers and metadata are available. No restore or repository-content operations are exposed.",
+		Instructions: "Restic snapshot discovery per catalog source_id. Repository credentials are resolved from OpenBao. Only bounded snapshot identifiers and metadata are available.",
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "restic_list_snapshots",
-		Description: "List up to the requested number of recent Restic snapshots from the configured repository. Returns IDs and limited metadata only, never paths or file contents.",
+		Description: "List up to the requested number of recent Restic snapshots for one source_id.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args listSnapshotsArgs) (*mcp.CallToolResult, listSnapshotsOutput, error) {
-		result, err := instance.ListSnapshots(ctx, args.Limit)
+		if !secrets.ValidSourceID(args.SourceID) {
+			return nil, listSnapshotsOutput{}, errors.New("invalid source_id")
+		}
+		result, err := instance.ListSnapshots(ctx, args.SourceID, args.Limit)
 		if err != nil {
 			return nil, listSnapshotsOutput{}, safeToolError(err)
 		}
@@ -102,10 +105,13 @@ func newMCPServer(instance service, stagers ...resticStagingService) *mcp.Server
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "restic_select_snapshot",
-		Description: "Explicitly select one full snapshot ID and return its metadata for a later, separate workflow. This does not restore or read repository contents.",
+		Description: "Select one full snapshot ID for a source_id and return its metadata.",
 		Annotations: readOnlyToolAnnotations(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, args selectSnapshotArgs) (*mcp.CallToolResult, snapshotOutput, error) {
-		snapshot, err := instance.SelectSnapshot(ctx, args.ID)
+		if !secrets.ValidSourceID(args.SourceID) {
+			return nil, snapshotOutput{}, errors.New("invalid source_id")
+		}
+		snapshot, err := instance.SelectSnapshot(ctx, args.SourceID, args.ID)
 		if err != nil {
 			return nil, snapshotOutput{}, safeToolError(err)
 		}
@@ -116,10 +122,13 @@ func newMCPServer(instance service, stagers ...resticStagingService) *mcp.Server
 		destructive, idempotent, openWorld := false, false, true
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "restic_stage_artifact",
-			Description: "Read one exact backup file from a selected Restic snapshot, resolve nested ZIP/tar/gzip wrappers, and stage one .bak or BACPAC in the configured shared artifact volume. Returns opaque metadata only; it never restores a directory tree or returns file bytes.",
+			Description: "Read one exact backup file from a selected Restic snapshot for source_id and stage one .bak or BACPAC.",
 			Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: &destructive, IdempotentHint: idempotent, OpenWorldHint: &openWorld},
 		}, func(ctx context.Context, _ *mcp.CallToolRequest, args stageResticArgs) (*mcp.CallToolResult, resticStagedArtifact, error) {
-			result, err := stagers[0].Stage(ctx, args.SnapshotID, args.BackupPath)
+			if !secrets.ValidSourceID(args.SourceID) {
+				return nil, resticStagedArtifact{}, errors.New("invalid source_id")
+			}
+			result, err := stagers[0].Stage(ctx, args.SourceID, args.SnapshotID, args.BackupPath)
 			if err != nil {
 				return nil, resticStagedArtifact{}, errors.New("Restic artifact staging failed")
 			}

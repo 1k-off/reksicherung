@@ -16,6 +16,11 @@ import (
 const (
 	defaultRemoteSQLCmd = "sqlcmd"
 	remoteOutputLimit   = 64 << 10
+
+	// DefaultBackupDirectory is used when REKSICHERUNG_SQLSERVER_BACKUP_DIR is unset.
+	DefaultBackupDirectory = "/var/opt/mssql/backup"
+	// DefaultDataDirectory is used when REKSICHERUNG_SQLSERVER_DATA_DIR is unset.
+	DefaultDataDirectory = "/var/opt/mssql/data"
 )
 
 var ErrRemoteBackupLimit = errors.New("SQL Server backup exceeded the configured size limit")
@@ -334,7 +339,9 @@ func (operations *RemoteOperations) DropDatabase(ctx context.Context, runID stri
 func (operations *RemoteOperations) execute(ctx context.Context, timeout time.Duration, options []string, query string) ([]byte, error) {
 	commandCtx, cancel := boundedChildContext(ctx, timeout)
 	defer cancel()
-	args := []string{"-b", "-N", "m", "-S", operations.config.Server, "-U", operations.config.Username, "-d", "master"}
+	// -C trusts the server certificate (ODBC 18). Isolated restore targets are
+	// typically compose/self-signed; sqlpackage already uses TrustServerCertificate.
+	args := []string{"-b", "-N", "m", "-C", "-S", operations.config.Server, "-U", operations.config.Username, "-d", "master"}
 	args = append(args, options...)
 	args = append(args, "-Q", query)
 	output, err := operations.runner.Run(commandCtx, operations.config.SQLCmd, args,

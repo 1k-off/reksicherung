@@ -7,11 +7,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf16"
 )
+
+// runScopedDatabasePattern matches restore MCP run-derived database names.
+var runScopedDatabasePattern = regexp.MustCompile(`^reksicherung_[0-9a-f]{32}$`)
 
 var (
 	ErrInvalidInput           = errors.New("invalid SQL Server inspection input")
@@ -170,6 +174,27 @@ func newService(db queryer, options Options) (*Service, error) {
 		return nil, err
 	}
 	return &Service{db: db, options: normalized}, nil
+}
+
+// ForDatabase returns a service scoped to database. The configured target is
+// always allowed. When the process target is master (Cursor/lab hosts that pin
+// DATABASE=master), run-scoped restore databases (reksicherung_<hex>) are also
+// allowed so semantic review can pass run_id without restarting MCP.
+func (s *Service) ForDatabase(database string) (*Service, error) {
+	if s == nil {
+		return nil, ErrInvalidInput
+	}
+	if database == s.options.TargetDatabase {
+		return s, nil
+	}
+	if s.options.TargetDatabase == "master" && runScopedDatabasePattern.MatchString(database) {
+		clone := *s
+		opts := s.options
+		opts.TargetDatabase = database
+		clone.options = opts
+		return &clone, nil
+	}
+	return nil, ErrInvalidInput
 }
 
 func normalizeOptions(options Options) (Options, error) {

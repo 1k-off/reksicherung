@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,7 +24,7 @@ func TestListSnapshotsBoundsResultsAndUsesArgvAndExplicitEnvironment(t *testing.
 	if len(result.Snapshots) != 1 || !result.Truncated {
 		t.Fatalf("ListSnapshots() = %#v, want one result with truncation", result)
 	}
-	if got, want := runner.args, []string{"snapshots", "--json", "--latest", "2"}; !reflect.DeepEqual(got, want) {
+	if got, want := runner.args, []string{"snapshots", "--json"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("Restic args = %q, want %q", got, want)
 	}
 	if runner.binary != "restic" {
@@ -93,12 +94,37 @@ func TestServiceRejectsMalformedOrUnexpectedResticJSON(t *testing.T) {
 	}
 }
 
-func TestListSnapshotsRejectsUnexpectedExcessRecords(t *testing.T) {
+func TestListSnapshotsTruncatesNewestFirst(t *testing.T) {
 	output := snapshotJSON(testSnapshotID, "")
 	output = append(output[:len(output)-1], []byte(`,{"id":"fedcfedcfedcfedcfedcfedcfedcfedcfedcfedcfedcfedcfedcfedcfedcfedc","time":"2024-12-31T03:04:05Z"}]`)...)
 	service := newTestService(t, &fakeRunner{output: output})
+	result, err := service.ListSnapshots(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("ListSnapshots() error = %v", err)
+	}
+	if !result.Truncated || len(result.Snapshots) != 1 || result.Snapshots[0].ID != testSnapshotID {
+		t.Fatalf("ListSnapshots() = %#v, want newest snapshot truncated to one", result)
+	}
+}
+
+func TestListSnapshotsRejectsAboveHardMax(t *testing.T) {
+	records := make([]map[string]any, 0, 102)
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 102; i++ {
+		records = append(records, map[string]any{
+			"id":       fmt.Sprintf("%064x", i),
+			"time":     base.Add(time.Duration(i) * time.Hour).Format(time.RFC3339),
+			"hostname": "archive-host",
+			"tags":     []string{"daily"},
+		})
+	}
+	output, err := json.Marshal(records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := newTestService(t, &fakeRunner{output: output})
 	if _, err := service.ListSnapshots(context.Background(), 1); !errors.Is(err, ErrFailed) {
-		t.Fatalf("ListSnapshots(excess records) error = %v, want ErrFailed", err)
+		t.Fatalf("ListSnapshots(above hard max) error = %v, want ErrFailed", err)
 	}
 }
 

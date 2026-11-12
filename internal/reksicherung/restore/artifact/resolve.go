@@ -53,100 +53,6 @@ type Limits struct {
 	TempDir           string
 }
 
-// Resolve consumes source and returns a private, temporary file containing
-// exactly one terminal .bak or BACPAC artifact. Supported wrappers are ZIP,
-// tar, gzip-compressed tar, and arbitrary nesting of those formats. Member
-// paths are inspected but never materialized, preventing traversal and link
-// attacks. The returned reader owns and removes its temporary file on Close.
-func Resolve(ctx context.Context, source io.ReadCloser, sourceName string, limits Limits) (io.ReadCloser, Kind, error) {
-	if source == nil {
-		return nil, "", ErrInvalidConfig
-	}
-	if ctx == nil {
-		_ = source.Close()
-		return nil, "", ErrInvalidConfig
-	}
-	defer source.Close()
-	if limits.MaxInputBytes <= 0 || limits.MaxExpandedBytes <= 0 || limits.MaxTemporaryBytes <= 0 {
-		return nil, "", ErrInvalidConfig
-	}
-	if limits.MaxNestingDepth == 0 {
-		limits.MaxNestingDepth = defaultMaxNestingDepth
-	}
-	if limits.MaxEntries == 0 {
-		limits.MaxEntries = defaultMaxEntries
-	}
-	if limits.MaxNestingDepth < 1 || limits.MaxNestingDepth > 32 ||
-		limits.MaxEntries < 1 || limits.MaxEntries > 100000 {
-		return nil, "", ErrInvalidConfig
-	}
-
-	manager := &tempManager{ctx: ctx, limits: limits, files: make(map[string]*tempFile)}
-	keep := false
-	defer func() {
-		if !keep {
-			manager.cleanup()
-		}
-	}()
-
-	current, err := manager.newFile(limits.MaxInputBytes)
-	if err != nil {
-		return nil, "", err
-	}
-	if err := copyToTemp(ctx, source, current, limits.MaxInputBytes); err != nil {
-		return nil, "", err
-	}
-	if err := current.closeWriter(); err != nil {
-		return nil, "", ErrInvalidArchive
-	}
-
-	currentName := sourceName
-	for depth := 0; ; depth++ {
-		if err := ctx.Err(); err != nil {
-			return nil, "", err
-		}
-		archiveType, finalKind, err := manager.detect(current, currentName)
-		if err != nil {
-			return nil, "", err
-		}
-		if archiveType == archiveNone {
-			reader, err := current.open()
-			if err != nil {
-				return nil, "", ErrInvalidArchive
-			}
-			keep = true
-			return &resolvedFile{File: reader, temp: current}, finalKind, nil
-		}
-		if depth >= limits.MaxNestingDepth {
-			return nil, "", ErrNestingTooDeep
-		}
-
-		var next *tempFile
-		var nextName string
-		switch archiveType {
-		case archiveZIP:
-			next, nextName, err = manager.extractZIP(current)
-		case archiveTar:
-			next, nextName, err = manager.extractTar(current, false)
-		case archiveTarGzip:
-			next, nextName, err = manager.extractTar(current, true)
-		default:
-			err = ErrUnsupported
-		}
-		if err != nil {
-			return nil, "", err
-		}
-		if err := current.remove(); err != nil {
-			_ = next.remove()
-			return nil, "", ErrInvalidArchive
-		}
-		current, currentName = next, nextName
-		if err := current.closeWriter(); err != nil {
-			return nil, "", ErrInvalidArchive
-		}
-	}
-}
-
 type archiveType uint8
 
 const (
@@ -300,7 +206,7 @@ func (manager *tempManager) detect(file *tempFile, name string) (archiveType, Ki
 	return archiveNone, "", ErrInvalidArchive
 }
 
-func (manager *tempManager) extractZIP(parent *tempFile) (*tempFile, string, error) {
+func (manager *tempManager) extractZIP(parent *tempFile, preferredMember string) (*tempFile, string, error) {
 	reader, err := parent.open()
 	if err != nil {
 		return nil, "", ErrInvalidArchive
@@ -343,14 +249,33 @@ func (manager *tempManager) extractZIP(parent *tempFile) (*tempFile, string, err
 	if declaredExpanded > manager.limits.MaxExpandedBytes-manager.expanded {
 		return nil, "", ErrLimitExceeded
 	}
-	if len(candidates) > 1 {
-		return nil, "", ErrAmbiguousArchive
-	}
-	if len(candidates) == 0 {
-		return nil, "", ErrNoArtifact
+
+	var member *zip.File
+	if preferredMember != "" {
+		for _, candidate := range candidates {
+			if candidate.Name == preferredMember {
+				member = candidate
+				break
+			}
+		}
+		if member == nil {
+			return nil, "", ErrNoArtifact
+		}
+	} else {
+		candidates = preferTerminalZIPCandidates(candidates)
+		terminals := terminalZIPCandidates(candidates)
+		if len(terminals) > 1 {
+			return nil, "", ambiguousFromZIP(terminals)
+		}
+		if len(candidates) > 1 && len(terminals) == 0 {
+			return nil, "", ErrAmbiguousArchive
+		}
+		if len(candidates) == 0 {
+			return nil, "", ErrNoArtifact
+		}
+		member = candidates[0]
 	}
 
-	member := candidates[0]
 	if member.UncompressedSize64 > uint64(manager.limits.MaxExpandedBytes-manager.expanded) ||
 		member.UncompressedSize64 > uint64(manager.limits.MaxTemporaryBytes) {
 		return nil, "", ErrLimitExceeded
@@ -384,7 +309,54 @@ func (manager *tempManager) extractZIP(parent *tempFile) (*tempFile, string, err
 	return output, member.Name, nil
 }
 
-func (manager *tempManager) extractTar(parent *tempFile, compressed bool) (*tempFile, string, error) {
+func (manager *tempManager) listZIPCandidates(parent *tempFile) (CandidateList, error) {
+	reader, err := parent.open()
+	if err != nil {
+		return CandidateList{}, ErrInvalidArchive
+	}
+	defer reader.Close()
+	info, err := reader.Stat()
+	if err != nil {
+		return CandidateList{}, ErrInvalidArchive
+	}
+	zipReader, err := zip.NewReader(reader, info.Size())
+	if err != nil {
+		return CandidateList{}, ErrInvalidArchive
+	}
+	if len(zipReader.File) > manager.limits.MaxEntries {
+		return CandidateList{}, ErrLimitExceeded
+	}
+	terminals := make([]Candidate, 0)
+	var declaredExpanded int64
+	for _, member := range zipReader.File {
+		if err := validateMemberPath(member.Name); err != nil {
+			return CandidateList{}, err
+		}
+		mode := member.Mode()
+		if mode&os.ModeSymlink != 0 || (!member.FileInfo().IsDir() && !mode.IsRegular() && mode.Type() != 0) {
+			return CandidateList{}, ErrInvalidArchive
+		}
+		if member.Flags&1 != 0 {
+			return CandidateList{}, ErrUnsupported
+		}
+		if member.UncompressedSize64 > uint64(manager.limits.MaxExpandedBytes) ||
+			declaredExpanded > manager.limits.MaxExpandedBytes-int64(member.UncompressedSize64) {
+			return CandidateList{}, ErrLimitExceeded
+		}
+		declaredExpanded += int64(member.UncompressedSize64)
+		if member.FileInfo().IsDir() || !isTerminalArtifactName(member.Name) {
+			continue
+		}
+		terminals = append(terminals, Candidate{
+			Path:     member.Name,
+			Size:     int64(member.UncompressedSize64),
+			KindHint: kindHintForName(member.Name),
+		})
+	}
+	return truncateCandidates(terminals), nil
+}
+
+func (manager *tempManager) extractTar(parent *tempFile, compressed bool, preferredMember string) (*tempFile, string, error) {
 	file, err := parent.open()
 	if err != nil {
 		return nil, "", ErrInvalidArchive
@@ -406,6 +378,8 @@ func (manager *tempManager) extractTar(parent *tempFile, compressed bool) (*temp
 	tarReader := tar.NewReader(counted)
 	var selected *tempFile
 	var selectedName string
+	selectedTerminal := false
+	terminals := make([]Candidate, 0)
 	entryCount := 0
 	var declaredExpanded int64
 	for {
@@ -455,12 +429,63 @@ func (manager *tempManager) extractTar(parent *tempFile, compressed bool) (*temp
 				return nil, "", ErrInvalidArchive
 			}
 		case tar.TypeReg, tar.TypeRegA:
+			if preferredMember != "" {
+				if header.Name != preferredMember {
+					continue
+				}
+				if !isTerminalArtifactName(header.Name) {
+					return nil, "", ErrInvalidArchive
+				}
+				if header.Size > manager.limits.MaxExpandedBytes-manager.expanded ||
+					header.Size > manager.limits.MaxTemporaryBytes {
+					return nil, "", ErrLimitExceeded
+				}
+				selected, err = manager.newFile(header.Size)
+				if err != nil {
+					return nil, "", err
+				}
+				if _, err := io.CopyN(selected, tarReader, header.Size); err != nil {
+					_ = selected.remove()
+					return nil, "", ErrInvalidArchive
+				}
+				selectedName = header.Name
+				selectedTerminal = true
+				continue
+			}
 			if !isCandidateName(header.Name) {
 				continue
 			}
+			terminal := isTerminalArtifactName(header.Name)
+			if terminal {
+				terminals = append(terminals, Candidate{
+					Path:     header.Name,
+					Size:     header.Size,
+					KindHint: kindHintForName(header.Name),
+				})
+				if len(terminals) > 1 {
+					// Ambiguous: drop any extracted member and keep collecting names.
+					if selected != nil {
+						_ = selected.remove()
+						selected = nil
+						selectedName = ""
+						selectedTerminal = false
+					}
+					continue
+				}
+			}
+			// Prefer terminal DB artifacts over nested wrappers.
 			if selected != nil {
+				if selectedTerminal && !terminal {
+					continue
+				}
+				if !selectedTerminal && !terminal {
+					_ = selected.remove()
+					return nil, "", ErrAmbiguousArchive
+				}
 				_ = selected.remove()
-				return nil, "", ErrAmbiguousArchive
+				selected = nil
+				selectedName = ""
+				selectedTerminal = false
 			}
 			if header.Size > manager.limits.MaxExpandedBytes-manager.expanded ||
 				header.Size > manager.limits.MaxTemporaryBytes {
@@ -475,6 +500,7 @@ func (manager *tempManager) extractTar(parent *tempFile, compressed bool) (*temp
 				return nil, "", ErrInvalidArchive
 			}
 			selectedName = header.Name
+			selectedTerminal = terminal
 		default:
 			if selected != nil {
 				_ = selected.remove()
@@ -491,6 +517,22 @@ func (manager *tempManager) extractTar(parent *tempFile, compressed bool) (*temp
 		}
 		return nil, "", ErrInvalidArchive
 	}
+	if preferredMember != "" {
+		if selected == nil {
+			return nil, "", ErrNoArtifact
+		}
+		if err := selected.closeWriter(); err != nil {
+			_ = selected.remove()
+			return nil, "", ErrInvalidArchive
+		}
+		return selected, selectedName, nil
+	}
+	if len(terminals) > 1 {
+		if selected != nil {
+			_ = selected.remove()
+		}
+		return nil, "", newAmbiguousError(terminals)
+	}
 	if selected == nil {
 		return nil, "", ErrNoArtifact
 	}
@@ -499,6 +541,79 @@ func (manager *tempManager) extractTar(parent *tempFile, compressed bool) (*temp
 		return nil, "", ErrInvalidArchive
 	}
 	return selected, selectedName, nil
+}
+
+func (manager *tempManager) listTarCandidates(parent *tempFile, compressed bool) (CandidateList, error) {
+	file, err := parent.open()
+	if err != nil {
+		return CandidateList{}, ErrInvalidArchive
+	}
+	defer file.Close()
+
+	var source io.Reader = file
+	var gzipReader *gzip.Reader
+	if compressed {
+		buffered := bufio.NewReader(file)
+		gzipReader, err = gzip.NewReader(buffered)
+		if err != nil {
+			return CandidateList{}, ErrInvalidArchive
+		}
+		defer gzipReader.Close()
+		source = gzipReader
+	}
+	counted := &expandedReader{manager: manager, reader: source}
+	tarReader := tar.NewReader(counted)
+	terminals := make([]Candidate, 0)
+	entryCount := 0
+	var declaredExpanded int64
+	for {
+		if err := manager.ctx.Err(); err != nil {
+			return CandidateList{}, err
+		}
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return CandidateList{}, ErrInvalidArchive
+		}
+		entryCount++
+		if entryCount > manager.limits.MaxEntries {
+			return CandidateList{}, ErrLimitExceeded
+		}
+		if err := validateMemberPath(header.Name); err != nil {
+			return CandidateList{}, err
+		}
+		if header.Size < 0 || header.Size > manager.limits.MaxExpandedBytes ||
+			declaredExpanded > manager.limits.MaxExpandedBytes-header.Size {
+			return CandidateList{}, ErrLimitExceeded
+		}
+		declaredExpanded += header.Size
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if header.Size != 0 {
+				return CandidateList{}, ErrInvalidArchive
+			}
+		case tar.TypeReg, tar.TypeRegA:
+			if !isTerminalArtifactName(header.Name) {
+				continue
+			}
+			terminals = append(terminals, Candidate{
+				Path:     header.Name,
+				Size:     header.Size,
+				KindHint: kindHintForName(header.Name),
+			})
+		default:
+			return CandidateList{}, ErrInvalidArchive
+		}
+	}
+	if _, err := io.Copy(io.Discard, counted); err != nil {
+		if errors.Is(err, ErrLimitExceeded) {
+			return CandidateList{}, ErrLimitExceeded
+		}
+		return CandidateList{}, ErrInvalidArchive
+	}
+	return truncateCandidates(terminals), nil
 }
 
 func (manager *tempManager) countExpanded(n int) error {
@@ -580,6 +695,41 @@ func isCandidateName(name string) bool {
 		strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".tar") ||
 		strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") ||
 		strings.HasSuffix(lower, ".gz")
+}
+
+func isTerminalArtifactName(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".bak") || strings.HasSuffix(lower, ".bacpac")
+}
+
+func preferTerminalZIPCandidates(candidates []*zip.File) []*zip.File {
+	terminals := terminalZIPCandidates(candidates)
+	if len(terminals) > 0 {
+		return terminals
+	}
+	return candidates
+}
+
+func terminalZIPCandidates(candidates []*zip.File) []*zip.File {
+	terminals := make([]*zip.File, 0, len(candidates))
+	for _, candidate := range candidates {
+		if isTerminalArtifactName(candidate.Name) {
+			terminals = append(terminals, candidate)
+		}
+	}
+	return terminals
+}
+
+func ambiguousFromZIP(terminals []*zip.File) error {
+	candidates := make([]Candidate, 0, len(terminals))
+	for _, member := range terminals {
+		candidates = append(candidates, Candidate{
+			Path:     member.Name,
+			Size:     int64(member.UncompressedSize64),
+			KindHint: kindHintForName(member.Name),
+		})
+	}
+	return newAmbiguousError(candidates)
 }
 
 func isArchiveName(name string) bool {

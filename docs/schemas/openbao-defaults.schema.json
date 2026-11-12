@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/openbao-defaults.schema.json",
+  "title": "OpenBao project defaults KV",
+  "description": "KV v2 data at secret/reksicherung/defaults. Optional; merged under each source.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "S3_ENDPOINT": { "type": "string", "format": "uri" },
+    "S3_REGION": { "type": "string", "minLength": 1 },
+    "S3_BUCKET": { "type": "string", "minLength": 3, "maxLength": 63 }
+  }
+}

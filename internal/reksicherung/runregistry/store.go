@@ -250,8 +250,8 @@ func validateUpdate(current, next Record) error {
 	if current.Verdict != VerdictUnknown && next.Verdict != current.Verdict {
 		return fmt.Errorf("%w: verdict is immutable after it is set", ErrInvalidRecord)
 	}
-	if current.AironRunID != "" && next.AironRunID != current.AironRunID {
-		return fmt.Errorf("%w: Airon run ID is immutable after it is set", ErrInvalidRecord)
+	if current.ExternalRunID != "" && next.ExternalRunID != current.ExternalRunID {
+		return fmt.Errorf("%w: external run ID is immutable after it is set", ErrInvalidRecord)
 	}
 	if current.DatabaseName != "" && next.DatabaseName != current.DatabaseName {
 		return fmt.Errorf("%w: database name is immutable after it is set", ErrInvalidRecord)

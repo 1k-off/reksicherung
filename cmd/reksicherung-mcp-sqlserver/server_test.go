@@ -14,80 +14,22 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestLoadConfigRequiresOneMatchingTargetDatabase(t *testing.T) {
-	tests := []struct {
-		name     string
-		dsn      string
-		database string
-		wantErr  bool
-	}{
-		{
-			name:     "configured URL target",
-			dsn:      "sqlserver://inspector:secret@127.0.0.1:1433?database=RestoredDb",
-			database: "RestoredDb",
-		},
-		{
-			name:     "target mismatch",
-			dsn:      "sqlserver://inspector:secret@127.0.0.1:1433?database=OtherDb",
-			database: "RestoredDb",
-			wantErr:  true,
-		},
-		{
-			name:     "duplicate target parameters",
-			dsn:      "sqlserver://inspector:secret@127.0.0.1:1433?database=RestoredDb&database=OtherDb",
-			database: "RestoredDb",
-			wantErr:  true,
-		},
-		{
-			name:     "remote target requires verified TLS",
-			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb",
-			database: "RestoredDb",
-			wantErr:  true,
-		},
-		{
-			name:     "remote target rejects disabled TLS",
-			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=disable",
-			database: "RestoredDb",
-			wantErr:  true,
-		},
-		{
-			name:     "remote target rejects unverified certificate",
-			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=true&trustservercertificate=true",
-			database: "RestoredDb",
-			wantErr:  true,
-		},
-		{
-			name:     "remote target with verified TLS",
-			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=true",
-			database: "RestoredDb",
-		},
-		{
-			name:     "remote target with strict TLS",
-			dsn:      "sqlserver://inspector:secret@sql.example.test:1433?database=RestoredDb&encrypt=strict",
-			database: "RestoredDb",
-		},
-		{
-			name:     "not a SQL Server URL",
-			dsn:      "not a connection string",
-			database: "RestoredDb",
-			wantErr:  true,
-		},
+func TestLoadConfigRequiresDatabaseAndOpenBao(t *testing.T) {
+	values := map[string]string{
+		databaseEnv:     "RestoredDb",
+		openBaoAddrEnv:  "https://openbao.example.test",
+		openBaoTokenEnv: "protected-token",
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			values := map[string]string{dsnEnv: test.dsn, databaseEnv: test.database}
-			got, err := loadConfig(func(key string) string { return values[key] })
-			if (err != nil) != test.wantErr {
-				t.Fatalf("loadConfig() error = %v, wantErr %v", err, test.wantErr)
-			}
-			if err == nil && (got.database != test.database || got.dsn != test.dsn) {
-				t.Fatalf("loadConfig() = %#v, want configured DSN and target", got)
-			}
-			if err != nil && strings.Contains(err.Error(), "secret") {
-				t.Fatalf("loadConfig() leaked connection credentials: %v", err)
-			}
-		})
+	got, err := loadConfig(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if got.database != "RestoredDb" {
+		t.Fatalf("loadConfig() = %#v", got)
+	}
+	delete(values, databaseEnv)
+	if _, err := loadConfig(func(key string) string { return values[key] }); err == nil {
+		t.Fatal("loadConfig() accepted missing database")
 	}
 }
 
@@ -345,6 +287,10 @@ type fakeInspectionService struct {
 	validationError error
 	integrity       sqlserver.IntegrityResult
 	integrityCalls  int
+}
+
+func (fake *fakeInspectionService) ScopeToDatabase(database string) (inspectionService, error) {
+	return fake, nil
 }
 
 func (fake *fakeInspectionService) ListTables(_ context.Context, database, schema string) (sqlserver.TableList, error) {

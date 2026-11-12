@@ -1,8 +1,8 @@
 // Package plan models and validates the database scope and execution policy for
 // a Reksicherung run.
 //
-// Plans are deliberately independent of Airon and configuration formats. An
-// orchestration adapter can translate project instructions into a RunPlan,
+// Plans are deliberately independent of orchestrators and configuration
+// formats. An adapter can translate project instructions into a RunPlan,
 // normalize it against the current inventory, and persist the returned plan
 // before starting any restore.
 package plan

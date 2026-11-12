@@ -18,6 +18,10 @@ func TestResolvePlainAndNestedArtifacts(t *testing.T) {
 	bacpac := makeBACPAC(t)
 	zipBackup := makeZIP(t, map[string][]byte{"nested/path/database.bak": []byte(testBackup)})
 	tarContainingZip := makeTarGzip(t, map[string][]byte{"level1/backup.zip": zipBackup})
+	tarWithWrapperAndTerminal := makeTarGzip(t, map[string][]byte{
+		"aos-default/archive.tar": []byte("not-a-real-tar"),
+		"aos-default/db.bacpac":   bacpac,
+	})
 
 	tests := []struct {
 		name string
@@ -29,6 +33,7 @@ func TestResolvePlainAndNestedArtifacts(t *testing.T) {
 		{name: "plain BACPAC", data: bacpac, kind: KindBACPAC, want: bacpac},
 		{name: "ZIP with nested BAK path", data: zipBackup, kind: KindSQLBackup, want: []byte(testBackup)},
 		{name: "gzip tar containing ZIP", data: tarContainingZip, kind: KindSQLBackup, want: []byte(testBackup)},
+		{name: "gzip tar prefers bacpac over nested tar", data: tarWithWrapperAndTerminal, kind: KindBACPAC, want: bacpac},
 	}
 
 	for _, test := range tests {
@@ -58,6 +63,36 @@ func TestResolvePlainAndNestedArtifacts(t *testing.T) {
 				t.Fatalf("temporary files after Close() = %v, err %v; want none", entries, err)
 			}
 		})
+	}
+}
+
+func TestListCandidatesAndResolveWithMemberPath(t *testing.T) {
+	data := makeZIP(t, map[string][]byte{
+		"shop/db-a.bak": []byte("aaa"),
+		"shop/db-b.bak": []byte("bbb"),
+	})
+	listed, err := ListCandidates(context.Background(), io.NopCloser(bytes.NewReader(data)), "archive.zip", testLimits(t.TempDir()))
+	if err != nil {
+		t.Fatalf("ListCandidates() error = %v", err)
+	}
+	if len(listed.Candidates) != 2 || listed.Truncated {
+		t.Fatalf("ListCandidates() = %#v", listed)
+	}
+	_, _, err = Resolve(context.Background(), io.NopCloser(bytes.NewReader(data)), "archive.zip", testLimits(t.TempDir()))
+	ambiguous, ok := AsAmbiguous(err)
+	if !ok || len(ambiguous.Candidates) != 2 {
+		t.Fatalf("Resolve() error = %v, want AmbiguousError", err)
+	}
+	resolved, kind, err := ResolveWith(context.Background(), io.NopCloser(bytes.NewReader(data)), "archive.zip", testLimits(t.TempDir()), ResolveOptions{
+		MemberPath: "shop/db-a.bak",
+	})
+	if err != nil {
+		t.Fatalf("ResolveWith() error = %v", err)
+	}
+	defer resolved.Close()
+	got, err := io.ReadAll(resolved)
+	if err != nil || kind != KindSQLBackup || string(got) != "aaa" {
+		t.Fatalf("ResolveWith() kind=%q data=%q err=%v", kind, got, err)
 	}
 }
 

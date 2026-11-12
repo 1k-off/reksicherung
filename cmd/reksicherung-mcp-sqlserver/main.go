@@ -7,8 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -18,18 +16,22 @@ import (
 	_ "github.com/microsoft/go-mssqldb"
 
 	sqlserver "github.com/1k-off/reksicherung/internal/reksicherung/mcp/sqlserver"
+	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
+	"github.com/1k-off/reksicherung/internal/reksicherung/secrets/openbao"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
-	dsnEnv           = "REKSICHERUNG_SQLSERVER_DSN"
 	databaseEnv      = "REKSICHERUNG_SQLSERVER_DATABASE"
+	openBaoAddrEnv   = "REKSICHERUNG_OPENBAO_ADDR"
+	openBaoTokenEnv  = "REKSICHERUNG_OPENBAO_TOKEN"
 	maxMCPFrameBytes = 64 * 1024
 )
 
 type serverConfig struct {
-	dsn      string
-	database string
+	database       string
+	openBaoAddress string
+	openBaoToken   string
 }
 
 func main() {
@@ -37,8 +39,6 @@ func main() {
 	defer stop()
 
 	if err := run(ctx, os.Getenv, os.Stdin, os.Stdout); err != nil {
-		// Errors from this executable are deliberately generic and never include
-		// environment values, connection details, prompts, or query arguments.
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -49,8 +49,21 @@ func run(ctx context.Context, getenv func(string) string, stdin, stdout *os.File
 	if err != nil {
 		return err
 	}
+	provider, err := openbao.New(config.openBaoAddress, config.openBaoToken)
+	if err != nil {
+		return errors.New("could not initialize configured OpenBao secret provider")
+	}
+	sqlMaterial, err := secrets.ResolveSQLServer(ctx, provider)
+	if err != nil {
+		return errors.New("could not resolve SQL Server connection from OpenBao")
+	}
+	defer sqlMaterial.Clear()
 
-	db, err := sql.Open("sqlserver", config.dsn)
+	dsn, err := sqlMaterial.MSSQLDSN(config.database)
+	if err != nil {
+		return errors.New("could not build SQL Server DSN")
+	}
+	db, err := sql.Open("sqlserver", dsn)
 	if err != nil {
 		return errors.New("could not initialize SQL Server connection")
 	}
@@ -77,76 +90,32 @@ func run(ctx context.Context, getenv func(string) string, stdin, stdout *os.File
 		return errors.New("could not initialize SQL Server inspection")
 	}
 
-	return serve(ctx, service, config.database, stdin, stdout)
+	return serve(ctx, inspectionAdapter{service}, config.database, stdin, stdout)
+}
+
+// inspectionAdapter exposes ScopeToDatabase for run_id-targeted semantic review.
+type inspectionAdapter struct {
+	*sqlserver.Service
+}
+
+func (adapter inspectionAdapter) ScopeToDatabase(database string) (inspectionService, error) {
+	scoped, err := adapter.Service.ForDatabase(database)
+	if err != nil {
+		return nil, err
+	}
+	return inspectionAdapter{scoped}, nil
 }
 
 func loadConfig(getenv func(string) string) (serverConfig, error) {
-	dsn := getenv(dsnEnv)
-	database := getenv(databaseEnv)
-	if dsn == "" || database == "" {
-		return serverConfig{}, fmt.Errorf("%s and %s must be set", dsnEnv, databaseEnv)
+	config := serverConfig{
+		database:       strings.TrimSpace(getenv(databaseEnv)),
+		openBaoAddress: getenv(openBaoAddrEnv),
+		openBaoToken:   getenv(openBaoTokenEnv),
 	}
-	if !dsnSelectsDatabase(dsn, database) {
-		return serverConfig{}, errors.New("SQL Server DSN must select the configured target database")
+	if config.database == "" || config.openBaoAddress == "" || config.openBaoToken == "" {
+		return serverConfig{}, errors.New("REKSICHERUNG_SQLSERVER_DATABASE, REKSICHERUNG_OPENBAO_ADDR, and REKSICHERUNG_OPENBAO_TOKEN must be set")
 	}
-	return serverConfig{dsn: dsn, database: database}, nil
-}
-
-// dsnSelectsDatabase accepts the URL form used by go-mssqldb and prevents the
-// server configuration from inspecting a database other than its selected
-// target. It intentionally never includes the DSN in an error.
-func dsnSelectsDatabase(dsn, target string) bool {
-	parsed, err := url.Parse(dsn)
-	if err != nil || parsed.Scheme != "sqlserver" || parsed.Hostname() == "" ||
-		parsed.Path != "" || parsed.Fragment != "" {
-		return false
-	}
-	query, err := url.ParseQuery(parsed.RawQuery)
-	if err != nil {
-		return false
-	}
-	database, ok := singleQueryValue(query, "database")
-	if !ok || database != target {
-		return false
-	}
-	if isLoopbackSQLHost(parsed.Hostname()) {
-		return true
-	}
-	encrypt, ok := singleQueryValue(query, "encrypt")
-	if !ok || (!strings.EqualFold(encrypt, "true") && !strings.EqualFold(encrypt, "strict")) {
-		return false
-	}
-	trustServerCertificate, present, ok := optionalSingleQueryValue(query, "trustservercertificate")
-	return ok && (!present || strings.EqualFold(trustServerCertificate, "false"))
-}
-
-func singleQueryValue(values url.Values, key string) (string, bool) {
-	value, present, ok := optionalSingleQueryValue(values, key)
-	return value, present && ok
-}
-
-func optionalSingleQueryValue(values url.Values, key string) (string, bool, bool) {
-	var value string
-	present := false
-	for name, entries := range values {
-		if !strings.EqualFold(name, key) {
-			continue
-		}
-		if present || len(entries) != 1 {
-			return "", false, false
-		}
-		present = true
-		value = entries[0]
-	}
-	return value, present, true
-}
-
-func isLoopbackSQLHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	address := net.ParseIP(host)
-	return address != nil && address.IsLoopback()
+	return config, nil
 }
 
 func serve(ctx context.Context, service inspectionService, database string, stdin, stdout *os.File) error {
