@@ -1,0 +1,107 @@
+# Fragment: paste into job/airon.yaml and job/airon-catalog-sweep.yaml as
+# mcp_servers: — substitute:
+#   RUNTIME          e.g. podman | docker | nerdctl
+#   COMPOSE_PROJECT  e.g. reksicherung-airon
+#   IMAGE_TAG        e.g. latest
+#
+# Full prompt/workspace skeletons: templates/airon.yaml,
+# templates/airon-catalog-sweep.yaml.
+# cwd for airon run: job/
+# Requires host env REKSICHERUNG_OPENBAO_TOKEN (and OPENAI_API_KEY / Anthropic).
+
+mcp_servers:
+  - name: gobackup
+    transport: stdio
+    command: RUNTIME
+    args:
+      - run
+      - --rm
+      - -i
+      - --network
+      - COMPOSE_PROJECT_reksicherung
+      - -e
+      - REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200
+      - -e
+      - REKSICHERUNG_OPENBAO_PLAINTEXT=1
+      - -e
+      - REKSICHERUNG_OPENBAO_TOKEN=${REKSICHERUNG_OPENBAO_TOKEN}
+      - -e
+      - REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts
+      - -v
+      - COMPOSE_PROJECT_artifact-stage:/var/lib/reksicherung/artifacts
+      - ghcr.io/1k-off/reksicherung/mcp-gobackup:IMAGE_TAG
+    env_passthrough: true
+    timeout: 45m
+
+  - name: restic
+    transport: stdio
+    command: RUNTIME
+    args:
+      - run
+      - --rm
+      - -i
+      - --network
+      - COMPOSE_PROJECT_reksicherung
+      - -e
+      - REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200
+      - -e
+      - REKSICHERUNG_OPENBAO_PLAINTEXT=1
+      - -e
+      - REKSICHERUNG_OPENBAO_TOKEN=${REKSICHERUNG_OPENBAO_TOKEN}
+      - -e
+      - REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts
+      - -v
+      - COMPOSE_PROJECT_artifact-stage:/var/lib/reksicherung/artifacts
+      - ghcr.io/1k-off/reksicherung/mcp-restic:IMAGE_TAG
+    env_passthrough: true
+    timeout: 45m
+
+  - name: restore
+    transport: stdio
+    command: RUNTIME
+    args:
+      - run
+      - --rm
+      - -i
+      - --network
+      - COMPOSE_PROJECT_reksicherung
+      - -e
+      - REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200
+      - -e
+      - REKSICHERUNG_OPENBAO_PLAINTEXT=1
+      - -e
+      - REKSICHERUNG_OPENBAO_TOKEN=${REKSICHERUNG_OPENBAO_TOKEN}
+      - -e
+      - REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts
+      - -e
+      - REKSICHERUNG_SQLSERVER_BACKUP_DIR=/var/opt/mssql/backup
+      - -e
+      - REKSICHERUNG_SQLSERVER_DATA_DIR=/var/opt/mssql/data
+      - -v
+      - COMPOSE_PROJECT_artifact-stage:/var/lib/reksicherung/artifacts
+      - -v
+      - COMPOSE_PROJECT_sql-backup:/var/opt/mssql/backup
+      - ghcr.io/1k-off/reksicherung/mcp-sqlserver-restore:IMAGE_TAG
+    env_passthrough: true
+    timeout: 45m
+
+  - name: inspect
+    transport: stdio
+    command: RUNTIME
+    args:
+      - run
+      - --rm
+      - -i
+      - --network
+      - COMPOSE_PROJECT_reksicherung
+      - -e
+      - REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200
+      - -e
+      - REKSICHERUNG_OPENBAO_PLAINTEXT=1
+      - -e
+      - REKSICHERUNG_OPENBAO_TOKEN=${REKSICHERUNG_OPENBAO_TOKEN}
+      - -e
+      - REKSICHERUNG_SQLSERVER_DATABASE=master
+      - ghcr.io/1k-off/reksicherung/mcp-sqlserver-inspect:IMAGE_TAG
+    env_passthrough: true
+    timeout: 45m

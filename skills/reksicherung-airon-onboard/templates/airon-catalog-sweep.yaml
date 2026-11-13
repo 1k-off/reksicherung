@@ -1,0 +1,88 @@
+# Template: job/airon-catalog-sweep.yaml — oldest/never-checked coverage sweep.
+# Substitute: RUNTIME, COMPOSE_PROJECT, IMAGE_TAG.
+# cwd: job/
+#
+#   airon run --config .\airon-catalog-sweep.yaml --no-healthchecks `
+#     --input "cleanup=delete`ndaily_batch=2`noldest_window=10"
+#
+# Agent reads catalog/ + coverage/ via fs_*, picks batch, writes
+# coverage/runs/… + registry (database_name ↔ restored_database).
+# Do not list skill names in prompts.tools — inject via {{file:}}.
+
+version: "1"
+
+provider:
+  type: openai
+  model: gpt-4o
+  api_key: ${OPENAI_API_KEY}
+
+workspace:
+  # Package root for fs_* + {{file:job/skills/...}}.
+  # Hard rule: never touch compose/, *.env, openbao-init.json.
+  path: ..
+
+runtime:
+  max_tool_rounds: 80
+  max_call_depth: 2
+  save_outputs: true
+  outcome: pass_fail
+
+log:
+  level: info
+
+# REQUIRED: replace with contents of airon-mcp-stdio.yaml
+# (substitute RUNTIME, COMPOSE_PROJECT, IMAGE_TAG). Leaving [] means no MCP tools.
+mcp_servers: []
+
+prompts:
+  - id: catalog_sweep
+    system: |
+      You are the catalog coverage sweep orchestrator. Execute the procedure below
+      yourself with fs_* and MCP tools. Never invent source_ids or backupPath.
+      Never read compose/, *.env, or openbao-init.json.
+      Never run docker/podman/compose — MCP only.
+      Final line MUST start with PASS: or FAIL: (not INCONCLUSIVE:).
+
+      {{file:job/skills/reksicherung-catalog-sweep/SKILL.md}}
+
+      Also follow the single-source restore pipeline from:
+      {{file:job/skills/reksicherung-restore-one/SKILL.md}}
+    content: |
+      Run a coverage restore-check sweep (never-checked / oldest sources).
+
+      Operator input (optional overrides — you still choose the batch):
+      {{input?}}
+
+      Defaults if omitted: daily_batch=2, oldest_window=10, cleanup=delete.
+      If source_id= is set, process only that id (still load catalog for provider/path).
+
+      Required sequence:
+      1) fs_read catalog/catalog.yaml and coverage/registry.json
+      2) Rank never-checked then oldest; pick daily_batch from oldest_window
+      3) For each pick: discover → stage → restore → integrity → cleanup (MCP)
+      4) From restore MCP, keep database_name (catalog) and restored_database (result.database)
+      5) fs_write coverage/runs/YYYY-MM-DD/<source_id>.md evidence after EACH source
+      6) fs_write coverage/registry.json (include database_name, restored_database, last_report)
+      7) Final PASS: or FAIL: plus ### restore_map block
+
+      Do not stop after reading files — continue into MCP restore tools.
+      Do not end without evidence + registry + PASS:/FAIL: + restore_map.
+    tools:
+      - fs_read
+      - fs_write
+      - fs_list
+      - gobackup__gobackup_list
+      - gobackup__gobackup_latest
+      - gobackup__gobackup_select
+      - gobackup__gobackup_list_archive_candidates
+      - gobackup__gobackup_stage_artifact
+      - restic__restic_list_snapshots
+      - restic__restic_select_snapshot
+      - restic__restic_stage_artifact
+      - restore__sqlserver_restore_backup
+      - restore__sqlserver_check_restore_integrity
+      - restore__sqlserver_drop_restore_database
+      - inspect__sqlserver_list_tables
+      - inspect__sqlserver_describe_table
+      - inspect__sqlserver_validate_table
+      - inspect__sqlserver_check_integrity

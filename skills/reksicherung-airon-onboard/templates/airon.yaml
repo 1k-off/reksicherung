@@ -1,0 +1,72 @@
+# Template: job/airon.yaml — single source_id restore-check.
+# Substitute: RUNTIME, COMPOSE_PROJECT, IMAGE_TAG (and provider keys).
+# cwd: job/
+#
+# Note: airon skill tools are one-shot text (no MCP loop). Inject SKILL.md via
+# {{file:}}; put only MCP tools in prompts.tools.
+# workspace.path = package root so {{file:job/skills/...}} works.
+
+version: "1"
+
+provider:
+  type: openai
+  model: gpt-4o
+  api_key: ${OPENAI_API_KEY}
+
+workspace:
+  # Package root: {{file:job/skills/...}} + optional fs_read catalog/.
+  # Hard rule: never touch compose/, *.env, openbao-init.json.
+  path: ..
+
+runtime:
+  max_tool_rounds: 40
+  max_call_depth: 2
+  save_outputs: true
+  outcome: pass_fail
+
+log:
+  level: info
+
+# REQUIRED: replace with contents of airon-mcp-stdio.yaml
+# (substitute RUNTIME, COMPOSE_PROJECT, IMAGE_TAG). Leaving [] means no MCP tools.
+mcp_servers: []
+
+prompts:
+  - id: restore_check
+    system: |
+      You are the restore-check orchestrator. Execute the procedure below yourself
+      with MCP tools (airon skill tools have no tool loop — do not call skill names).
+      Process exactly ONE source_id. Never invent catalog ids, credentials, or paths.
+      Never read compose/, *.env, or openbao-init.json.
+      Never run docker/podman/compose — MCP only.
+      Final line MUST start with PASS: or FAIL: (not INCONCLUSIVE:).
+      Include: database_name=… restored_database=… run_id=…
+
+      {{file:job/skills/reksicherung-restore-one/SKILL.md}}
+    content: |
+      Run one restoreability check.
+
+      Operator input:
+      {{input?}}
+
+      If source_id is missing, FAIL immediately.
+      Default cleanup=hold_for_review unless input says cleanup=delete.
+      For restic sources, operator input must include backupPath= (catalog path).
+      Never invent backup_path or archive member paths.
+      Call gobackup__/restic__/restore__/inspect__ tools directly.
+    tools:
+      - gobackup__gobackup_list
+      - gobackup__gobackup_latest
+      - gobackup__gobackup_select
+      - gobackup__gobackup_list_archive_candidates
+      - gobackup__gobackup_stage_artifact
+      - restic__restic_list_snapshots
+      - restic__restic_select_snapshot
+      - restic__restic_stage_artifact
+      - restore__sqlserver_restore_backup
+      - restore__sqlserver_check_restore_integrity
+      - restore__sqlserver_drop_restore_database
+      - inspect__sqlserver_list_tables
+      - inspect__sqlserver_describe_table
+      - inspect__sqlserver_validate_table
+      - inspect__sqlserver_check_integrity

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "policy": {
+    "monthly_min": 60,
+    "daily_batch": 2,
+    "oldest_window": 10
+  },
+  "sources": {
+    "acme-prod-appdb-daily": {
+      "last_checked_at": null,
+      "last_status": null,
+      "last_run_id": null,
+      "provider": "restic",
+      "database_name": "AppDb",
+      "restored_database": null,
+      "last_report": null,
+      "checks_total": 0
+    },
+    "contoso-web-sql-default": {
+      "last_checked_at": null,
+      "last_status": null,
+      "last_run_id": null,
+      "provider": "gobackup",
+      "database_name": "WebSql",
+      "restored_database": null,
+      "last_report": null,
+      "checks_total": 0
+    }
+  }
+}

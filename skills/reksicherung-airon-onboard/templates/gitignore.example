@@ -1,0 +1,10 @@
+compose/.env
+compose/openbao-init.json
+scripts/Seed-OpenBaoSecrets.*
+coverage/registry.json
+coverage/runs/
+logs/
+outputs/
+job/workspace/**
+!job/workspace/.gitkeep
+*.log
