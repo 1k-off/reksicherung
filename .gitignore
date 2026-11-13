@@ -40,4 +40,5 @@ Thumbs.db
 *.key
 
 examples/catalog.yaml
+examples/openbao-secrets.sh
 bcai.code-workspace
