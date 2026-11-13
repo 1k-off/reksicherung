@@ -3,8 +3,8 @@
 The initial CLI exposes catalog validation and generation:
 
 ```sh
-go run ./cmd/reksicherung validate -config examples/catalog.yaml
-go run ./cmd/reksicherung catalog -config examples/catalog.yaml
+go run ./cmd/reksicherung validate -config examples/catalog.example.yaml
+go run ./cmd/reksicherung catalog -config examples/catalog.example.yaml
 go run ./cmd/reksicherung validate -config production.yaml -production
 ```
 

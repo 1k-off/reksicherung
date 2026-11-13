@@ -8,7 +8,7 @@ backups:
       name: Shop
     selection:
       policy: latest
-    cleanup: hold_for_review 
+    cleanup: hold_for_review
     validation:
       semanticReview: true
   - id: reporting-production
@@ -20,4 +20,4 @@ backups:
       name: Reporting
     selection:
       policy: latest
-    cleanup: hold_for_review 
+    cleanup: hold_for_review

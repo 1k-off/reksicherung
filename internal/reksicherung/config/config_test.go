@@ -41,7 +41,7 @@ func TestDecodeValidCatalog(t *testing.T) {
 }
 
 func TestDecodeRepositoryExampleCatalog(t *testing.T) {
-	data, err := os.ReadFile("../../../examples/catalog.yaml")
+	data, err := os.ReadFile("../../../examples/catalog.example.yaml")
 	if err != nil {
 		t.Fatalf("ReadFile(example) error = %v", err)
 	}

@@ -23,7 +23,7 @@ Module path: `github.com/1k-off/reksicherung`. Catalog API: `reksicherung.1node.
 1. Follow skill [`skills/reksicherung-bootstrap/SKILL.md`](skills/reksicherung-bootstrap/SKILL.md).
 2. Copy [`examples/compose/.env.example`](examples/compose/.env.example) → `.env` (bootstrap only).
 3. OpenBao KV: defaults + `sources/<id>` + sqlserver ([`docs/schemas/openbao-source-kv.md`](docs/schemas/openbao-source-kv.md)).
-4. Thin catalog ([`examples/catalog.yaml`](examples/catalog.yaml)); `reksicherung validate` / `catalog`.
+4. Thin catalog ([`examples/catalog.example.yaml`](examples/catalog.example.yaml)); `reksicherung validate` / `catalog`.
 5. Drive MCP tools manually or via an orchestrator job ([`examples/airon/restore-check.yaml`](examples/airon/restore-check.yaml) is one optional binding) + restore-check skill.
 6. E2E when fixtures available: `go test -tags=e2e ./test/e2e/...`
 
