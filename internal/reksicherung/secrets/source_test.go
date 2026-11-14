@@ -39,9 +39,10 @@ func TestValidSourceID(t *testing.T) {
 func TestResolveSourceMergesDefaultsAndIsolatesSources(t *testing.T) {
 	provider := mapProvider{
 		DefaultsPath: {
-			FieldS3Endpoint: "https://objects.example.test",
-			FieldS3Region:   "fsn1",
-			FieldS3Bucket:   "backups",
+			FieldStorageType: StorageTypeS3,
+			FieldS3Endpoint:  "https://objects.example.test",
+			FieldS3Region:    "fsn1",
+			FieldS3Bucket:    "backups",
 		},
 		SourcesPathPrefix + "shop-production": {
 			FieldS3AccessKeyID:     "shop-key",
@@ -61,7 +62,7 @@ func TestResolveSourceMergesDefaultsAndIsolatesSources(t *testing.T) {
 		t.Fatalf("ResolveSource(shop) error = %v", err)
 	}
 	defer shop.Clear()
-	if shop.Bucket != "backups" || shop.PathPrefix != "shop/production/" || string(shop.AccessKeyID) != "shop-key" {
+	if shop.StorageType != StorageTypeS3 || shop.Bucket != "backups" || shop.PathPrefix != "shop/production/" || string(shop.AccessKeyID) != "shop-key" {
 		t.Fatalf("shop material = %#v", shop)
 	}
 
@@ -78,9 +79,26 @@ func TestResolveSourceMergesDefaultsAndIsolatesSources(t *testing.T) {
 	}
 }
 
+func TestResolveSourceRequiresStorageType(t *testing.T) {
+	provider := mapProvider{
+		SourcesPathPrefix + "app": {
+			FieldS3AccessKeyID:     "k",
+			FieldS3SecretAccessKey: "s",
+			FieldS3Endpoint:        "https://objects.example.test",
+			FieldS3Region:          "fsn1",
+			FieldS3Bucket:          "backups",
+			FieldS3PathPrefix:      "app/",
+		},
+	}
+	if _, err := ResolveSource(context.Background(), provider, "app", "gobackup"); !errors.Is(err, ErrIncompleteSource) {
+		t.Fatalf("error = %v, want ErrIncompleteSource", err)
+	}
+}
+
 func TestResolveSourceRequiresResticFields(t *testing.T) {
 	provider := mapProvider{
 		SourcesPathPrefix + "app": {
+			FieldStorageType:       StorageTypeS3,
 			FieldS3AccessKeyID:     "k",
 			FieldS3SecretAccessKey: "s",
 			FieldS3Endpoint:        "https://objects.example.test",
@@ -98,4 +116,94 @@ func TestResolveSourceRequiresResticFields(t *testing.T) {
 		t.Fatalf("ResolveSource(restic) error = %v", err)
 	}
 	material.Clear()
+}
+
+func TestResolveSourceAzureKeyAndServicePrincipal(t *testing.T) {
+	base := map[string]string{
+		FieldStorageType:     StorageTypeAzure,
+		FieldAzureAccountName: "mystorageacct",
+		FieldAzureContainer:  "backups",
+		FieldAzurePathPrefix: "shop/production/",
+	}
+
+	t.Run("account key gobackup", func(t *testing.T) {
+		fields := cloneMap(base)
+		fields[FieldAzureAccountKey] = "account-key-value"
+		provider := mapProvider{SourcesPathPrefix + "shop": fields}
+		material, err := ResolveSource(context.Background(), provider, "shop", "gobackup")
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		defer material.Clear()
+		if material.StorageType != StorageTypeAzure || string(material.AzureAccountKey) != "account-key-value" {
+			t.Fatalf("material = %#v", material)
+		}
+	})
+
+	t.Run("service principal gobackup", func(t *testing.T) {
+		fields := cloneMap(base)
+		fields[FieldAzureTenantID] = "tenant"
+		fields[FieldAzureClientID] = "client"
+		fields[FieldAzureClientSecret] = "secret"
+		provider := mapProvider{SourcesPathPrefix + "shop": fields}
+		material, err := ResolveSource(context.Background(), provider, "shop", "gobackup")
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		material.Clear()
+	})
+
+	t.Run("mixed auth rejected", func(t *testing.T) {
+		fields := cloneMap(base)
+		fields[FieldAzureAccountKey] = "key"
+		fields[FieldAzureTenantID] = "tenant"
+		fields[FieldAzureClientID] = "client"
+		fields[FieldAzureClientSecret] = "secret"
+		provider := mapProvider{SourcesPathPrefix + "shop": fields}
+		if _, err := ResolveSource(context.Background(), provider, "shop", "gobackup"); !errors.Is(err, ErrIncompleteSource) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("s3 fields with azure type rejected", func(t *testing.T) {
+		fields := cloneMap(base)
+		fields[FieldAzureAccountKey] = "key"
+		fields[FieldS3Bucket] = "nope"
+		provider := mapProvider{SourcesPathPrefix + "shop": fields}
+		if _, err := ResolveSource(context.Background(), provider, "shop", "gobackup"); !errors.Is(err, ErrIncompleteSource) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+
+	t.Run("restic requires account key and azure repo", func(t *testing.T) {
+		fields := cloneMap(base)
+		fields[FieldAzureTenantID] = "tenant"
+		fields[FieldAzureClientID] = "client"
+		fields[FieldAzureClientSecret] = "secret"
+		fields[FieldResticRepository] = "azure:backups:/shop"
+		fields[FieldResticPassword] = "pass"
+		provider := mapProvider{SourcesPathPrefix + "shop": fields}
+		if _, err := ResolveSource(context.Background(), provider, "shop", "restic"); !errors.Is(err, ErrIncompleteSource) {
+			t.Fatalf("sp-only restic error = %v", err)
+		}
+
+		fields = cloneMap(base)
+		fields[FieldAzureAccountKey] = "key"
+		fields[FieldResticRepository] = "azure:backups:/shop/"
+		fields[FieldResticPassword] = "pass"
+		provider = mapProvider{SourcesPathPrefix + "shop": fields}
+		material, err := ResolveSource(context.Background(), provider, "shop", "restic")
+		if err != nil {
+			t.Fatalf("key restic error = %v", err)
+		}
+		material.Clear()
+	})
+}
+
+func cloneMap(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }

@@ -39,6 +39,13 @@ func ValidateForProvider(in input.Input) error {
 	}
 	switch strings.ToLower(in.Storage.Type) {
 	case "s3", "minio":
+	case "azure":
+		if in.Storage.AccountKeyRef == "" {
+			return errors.New("resticprofile: azure requires account_key_ref")
+		}
+		if in.Storage.TenantIDRef != "" || in.Storage.ClientIDRef != "" || in.Storage.ClientSecretRef != "" {
+			return errors.New("resticprofile: azure service principal refs are not supported")
+		}
 	case "sftp":
 		return errors.New("resticprofile: storage.type sftp is not supported")
 	default:

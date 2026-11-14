@@ -81,14 +81,9 @@ func (gateway *resticSourceGateway) forSource(ctx context.Context, sourceID stri
 	}
 	defer material.Clear()
 
-	environment := []string{
-		"AWS_ACCESS_KEY_ID=" + string(material.AccessKeyID),
-		"AWS_SECRET_ACCESS_KEY=" + string(material.SecretAccessKey),
-		"AWS_DEFAULT_REGION=" + material.Region,
-		// Distroless nonroot cannot create /.cache; keep restic cache on the
-		// shared artifact volume.
-		"RESTIC_CACHE_DIR=" + gateway.cacheDir,
-		"XDG_CACHE_HOME=" + gateway.cacheDir,
+	environment, restoreEnv, err := resticStorageEnvironment(material, gateway.cacheDir)
+	if err != nil {
+		return nil, err
 	}
 	service, err := resticservice.New(resticservice.Options{
 		Binary: "restic", Repository: material.ResticRepository, Password: string(material.ResticPassword),
@@ -96,15 +91,6 @@ func (gateway *resticSourceGateway) forSource(ctx context.Context, sourceID stri
 	})
 	if err != nil {
 		return nil, errors.New("could not initialize Restic snapshot discovery for source_id")
-	}
-
-	restoreEnv := []resticrestore.EnvironmentVariable{
-		{Name: "RESTIC_PASSWORD", Value: string(material.ResticPassword)},
-		{Name: "AWS_ACCESS_KEY_ID", Value: string(material.AccessKeyID)},
-		{Name: "AWS_SECRET_ACCESS_KEY", Value: string(material.SecretAccessKey)},
-		{Name: "AWS_DEFAULT_REGION", Value: material.Region},
-		{Name: "RESTIC_CACHE_DIR", Value: gateway.cacheDir},
-		{Name: "XDG_CACHE_HOME", Value: gateway.cacheDir},
 	}
 	client, err := resticrestore.New(resticrestore.Config{
 		Executable: "restic", Repository: material.ResticRepository, Timeout: 6 * time.Hour,
@@ -126,4 +112,52 @@ func (gateway *resticSourceGateway) forSource(ctx context.Context, sourceID stri
 	}
 	gateway.cache[sourceID] = cached
 	return cached, nil
+}
+
+func resticStorageEnvironment(material secrets.SourceMaterial, cacheDir string) ([]string, []resticrestore.EnvironmentVariable, error) {
+	cacheEnv := []string{
+		"RESTIC_CACHE_DIR=" + cacheDir,
+		"XDG_CACHE_HOME=" + cacheDir,
+	}
+	switch material.StorageType {
+	case secrets.StorageTypeS3:
+		environment := append([]string{
+			"AWS_ACCESS_KEY_ID=" + string(material.AccessKeyID),
+			"AWS_SECRET_ACCESS_KEY=" + string(material.SecretAccessKey),
+			"AWS_DEFAULT_REGION=" + material.Region,
+		}, cacheEnv...)
+		restoreEnv := []resticrestore.EnvironmentVariable{
+			{Name: "RESTIC_PASSWORD", Value: string(material.ResticPassword)},
+			{Name: "AWS_ACCESS_KEY_ID", Value: string(material.AccessKeyID)},
+			{Name: "AWS_SECRET_ACCESS_KEY", Value: string(material.SecretAccessKey)},
+			{Name: "AWS_DEFAULT_REGION", Value: material.Region},
+			{Name: "RESTIC_CACHE_DIR", Value: cacheDir},
+			{Name: "XDG_CACHE_HOME", Value: cacheDir},
+		}
+		return environment, restoreEnv, nil
+	case secrets.StorageTypeAzure:
+		if len(material.AzureAccountKey) == 0 {
+			return nil, nil, errors.New("azure restic sources require AZURE_ACCOUNT_KEY")
+		}
+		environment := append([]string{
+			"AZURE_ACCOUNT_NAME=" + material.AzureAccountName,
+			"AZURE_ACCOUNT_KEY=" + string(material.AzureAccountKey),
+		}, cacheEnv...)
+		restoreEnv := []resticrestore.EnvironmentVariable{
+			{Name: "RESTIC_PASSWORD", Value: string(material.ResticPassword)},
+			{Name: "AZURE_ACCOUNT_NAME", Value: material.AzureAccountName},
+			{Name: "AZURE_ACCOUNT_KEY", Value: string(material.AzureAccountKey)},
+			{Name: "RESTIC_CACHE_DIR", Value: cacheDir},
+			{Name: "XDG_CACHE_HOME", Value: cacheDir},
+		}
+		if material.AzureEndpointSuffix != "" {
+			environment = append(environment, "AZURE_ENDPOINT_SUFFIX="+material.AzureEndpointSuffix)
+			restoreEnv = append(restoreEnv, resticrestore.EnvironmentVariable{
+				Name: "AZURE_ENDPOINT_SUFFIX", Value: material.AzureEndpointSuffix,
+			})
+		}
+		return environment, restoreEnv, nil
+	default:
+		return nil, nil, errors.New("unsupported STORAGE_TYPE for source_id")
+	}
 }

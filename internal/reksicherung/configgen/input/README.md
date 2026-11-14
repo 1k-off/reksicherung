@@ -13,5 +13,5 @@ Machine-readable schema: `docs/schemas/configgen-input.schema.json`
 (registry id `I-CONFIGGEN`).
 
 Each provider may reject fields it cannot map (`ValidateForProvider`). Storage
-`type` is an extensible discriminator (`s3`, `minio`, `sftp` today); new
+`type` is an extensible discriminator (`s3`, `minio`, `sftp`, `azure`); new
 backends extend this package first, then each renderer.

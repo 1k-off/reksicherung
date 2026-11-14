@@ -4,6 +4,7 @@ package resticprofile
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/1k-off/reksicherung/internal/reksicherung/configgen/input"
 	"gopkg.in/yaml.v3"
@@ -39,11 +40,20 @@ func Generate(in input.Input) (Result, error) {
 
 func buildDocument(in input.Input, bindings *input.Binder) (map[string]any, error) {
 	env := map[string]any{}
-	if in.Storage.AccessKeyIDRef != "" {
-		env["AWS_ACCESS_KEY_ID"] = bindings.Placeholder("storage_access_key_id", in.Storage.AccessKeyIDRef)
-	}
-	if in.Storage.SecretAccessKeyRef != "" {
-		env["AWS_SECRET_ACCESS_KEY"] = bindings.Placeholder("storage_secret_access_key", in.Storage.SecretAccessKeyRef)
+	switch strings.ToLower(in.Storage.Type) {
+	case "azure":
+		env["AZURE_ACCOUNT_NAME"] = in.Storage.Account
+		env["AZURE_ACCOUNT_KEY"] = bindings.Placeholder("storage_account_key", in.Storage.AccountKeyRef)
+		if in.Storage.EndpointSuffix != "" {
+			env["AZURE_ENDPOINT_SUFFIX"] = in.Storage.EndpointSuffix
+		}
+	default:
+		if in.Storage.AccessKeyIDRef != "" {
+			env["AWS_ACCESS_KEY_ID"] = bindings.Placeholder("storage_access_key_id", in.Storage.AccessKeyIDRef)
+		}
+		if in.Storage.SecretAccessKeyRef != "" {
+			env["AWS_SECRET_ACCESS_KEY"] = bindings.Placeholder("storage_secret_access_key", in.Storage.SecretAccessKeyRef)
+		}
 	}
 	env["RESTIC_PASSWORD"] = bindings.Placeholder("encryption_password", in.Encryption.PasswordRef)
 

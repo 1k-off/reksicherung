@@ -219,6 +219,51 @@ func TestGenerateSFTPAndCredentialBindings(t *testing.T) {
 	})
 }
 
+func TestGenerateAzureServicePrincipal(t *testing.T) {
+	in := input.Input{
+		Project: input.Project{Name: "azure-app"},
+		Storage: input.Storage{
+			Type:            "azure",
+			Account:         "mystorageacct",
+			Container:       "backups",
+			PathPrefix:      "azure-app",
+			TenantIDRef:     "openbao://secret/reksicherung/azure#tenant",
+			ClientIDRef:     "openbao://secret/reksicherung/azure#client",
+			ClientSecretRef: "openbao://secret/reksicherung/azure#secret",
+		},
+		Schedules: input.Schedules{Cron: "0 5 * * *", HealthcheckURLRef: healthRef},
+		Archive:   &input.Archive{Includes: []string{"/var/lib/app"}},
+	}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	storage := mapAt(t, mapAt(t, mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "models"), "azure_app_default"), "storages"), "primary")
+	assertEqual(t, storage, "type", "azure")
+	assertEqual(t, storage, "account", "mystorageacct")
+	assertEqual(t, storage, "container", "backups")
+	assertEqual(t, storage, "tenant_id", "$REKSICHERUNG_STORAGE_TENANT_ID")
+	assertEqual(t, storage, "client_id", "$REKSICHERUNG_STORAGE_CLIENT_ID")
+	assertEqual(t, storage, "client_secret", "$REKSICHERUNG_STORAGE_CLIENT_SECRET")
+}
+
+func TestGenerateRejectsAzureAccountKey(t *testing.T) {
+	in := input.Input{
+		Project: input.Project{Name: "azure-app"},
+		Storage: input.Storage{
+			Type:          "azure",
+			Account:       "mystorageacct",
+			Container:     "backups",
+			AccountKeyRef: "openbao://secret/reksicherung/azure#key",
+		},
+		Schedules: input.Schedules{Cron: "0 5 * * *", HealthcheckURLRef: healthRef},
+		Archive:   &input.Archive{Includes: []string{"/var/lib/app"}},
+	}
+	if _, err := Generate(in); err == nil {
+		t.Fatal("Generate() accepted azure account key")
+	}
+}
+
 func TestGenerateIsDeterministicAndYAMLParses(t *testing.T) {
 	in := simpleInput()
 	first, err := Generate(in)

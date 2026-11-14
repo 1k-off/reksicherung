@@ -9,6 +9,8 @@ import (
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/artifact"
 	"github.com/1k-off/reksicherung/internal/reksicherung/restore/staging"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
+	"github.com/1k-off/reksicherung/internal/reksicherung/storage"
+	"github.com/1k-off/reksicherung/internal/reksicherung/storage/azure"
 	"github.com/1k-off/reksicherung/internal/reksicherung/storage/s3"
 )
 
@@ -97,18 +99,12 @@ func (gateway *sourceGateway) forSource(ctx context.Context, sourceID string) (*
 	}
 	defer material.Clear()
 
-	store, err := s3.New(s3.Config{
-		Endpoint:        material.Endpoint,
-		Region:          material.Region,
-		Bucket:          material.Bucket,
-		AccessKeyID:     string(material.AccessKeyID),
-		SecretAccessKey: string(material.SecretAccessKey),
-	})
+	store, prefix, err := openObjectStore(material)
 	if err != nil {
-		return nil, nil, errors.New("invalid S3 object-storage configuration for source_id")
+		return nil, nil, err
 	}
 	service, err := gobackup.New(store, gobackup.Config{
-		Prefix:         material.PathPrefix,
+		Prefix:         prefix,
 		PageSize:       100,
 		MaxBackups:     1000,
 		MaxPages:       10,
@@ -129,4 +125,37 @@ func (gateway *sourceGateway) forSource(ctx context.Context, sourceID string) (*
 	}
 	gateway.cache[sourceID] = &cachedSource{service: service, stager: stager}
 	return service, stager, nil
+}
+
+func openObjectStore(material secrets.SourceMaterial) (storage.Store, string, error) {
+	switch material.StorageType {
+	case secrets.StorageTypeS3:
+		store, err := s3.New(s3.Config{
+			Endpoint:        material.Endpoint,
+			Region:          material.Region,
+			Bucket:          material.Bucket,
+			AccessKeyID:     string(material.AccessKeyID),
+			SecretAccessKey: string(material.SecretAccessKey),
+		})
+		if err != nil {
+			return nil, "", errors.New("invalid S3 object-storage configuration for source_id")
+		}
+		return store, material.PathPrefix, nil
+	case secrets.StorageTypeAzure:
+		store, err := azure.New(azure.Config{
+			AccountName:    material.AzureAccountName,
+			Container:      material.AzureContainer,
+			EndpointSuffix: material.AzureEndpointSuffix,
+			AccountKey:     string(material.AzureAccountKey),
+			TenantID:       string(material.AzureTenantID),
+			ClientID:       string(material.AzureClientID),
+			ClientSecret:   string(material.AzureClientSecret),
+		})
+		if err != nil {
+			return nil, "", errors.New("invalid Azure object-storage configuration for source_id")
+		}
+		return store, material.AzurePathPrefix, nil
+	default:
+		return nil, "", errors.New("unsupported STORAGE_TYPE for source_id")
+	}
 }

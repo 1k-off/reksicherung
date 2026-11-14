@@ -54,6 +54,15 @@ type Storage struct {
 	Port               int    `yaml:"port,omitempty"`
 	UsernameRef        string `yaml:"username_ref,omitempty"`
 	PasswordRef        string `yaml:"password_ref,omitempty"`
+
+	// Azure Blob fields (storage.type: azure).
+	Account            string `yaml:"account,omitempty"`
+	Container          string `yaml:"container,omitempty"`
+	EndpointSuffix     string `yaml:"endpoint_suffix,omitempty"`
+	AccountKeyRef      string `yaml:"account_key_ref,omitempty"`
+	TenantIDRef        string `yaml:"tenant_id_ref,omitempty"`
+	ClientIDRef        string `yaml:"client_id_ref,omitempty"`
+	ClientSecretRef    string `yaml:"client_secret_ref,omitempty"`
 }
 
 type Schedule struct {
@@ -246,6 +255,9 @@ func validateStorage(s Storage) error {
 		if s.Host != "" || s.Port != 0 || s.UsernameRef != "" || s.PasswordRef != "" {
 			return errors.New("sftp fields are not valid for s3/minio storage")
 		}
+		if hasAzureStorageFields(s) {
+			return errors.New("azure fields are not valid for s3/minio storage")
+		}
 		if s.Endpoint != "" {
 			u, err := url.Parse(s.Endpoint)
 			if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
@@ -263,8 +275,38 @@ func validateStorage(s Storage) error {
 		if s.Bucket != "" || s.Region != "" || s.Endpoint != "" || s.AccessKeyIDRef != "" || s.SecretAccessKeyRef != "" {
 			return errors.New("s3 fields are not valid for sftp storage")
 		}
+		if hasAzureStorageFields(s) {
+			return errors.New("azure fields are not valid for sftp storage")
+		}
+	case "azure":
+		if !validAzureAccount(s.Account) {
+			return errors.New("storage.account is required and must be a safe azure account name")
+		}
+		if !validAzureContainer(s.Container) {
+			return errors.New("storage.container is required and must be a safe azure container name")
+		}
+		if s.Bucket != "" || s.Region != "" || s.Endpoint != "" || s.AccessKeyIDRef != "" || s.SecretAccessKeyRef != "" ||
+			s.Host != "" || s.Port != 0 || s.UsernameRef != "" || s.PasswordRef != "" {
+			return errors.New("s3/sftp fields are not valid for azure storage")
+		}
+		if s.EndpointSuffix != "" && !validAzureEndpointSuffix(s.EndpointSuffix) {
+			return errors.New("storage.endpoint_suffix must be a safe azure endpoint suffix")
+		}
+		hasKey := s.AccountKeyRef != ""
+		hasSP := s.TenantIDRef != "" || s.ClientIDRef != "" || s.ClientSecretRef != ""
+		completeSP := s.TenantIDRef != "" && s.ClientIDRef != "" && s.ClientSecretRef != ""
+		switch {
+		case hasKey && hasSP:
+			return errors.New("storage azure account key and service principal cannot both be set")
+		case hasKey:
+		case completeSP:
+		case hasSP:
+			return errors.New("storage azure service principal refs are incomplete")
+		default:
+			return errors.New("storage azure requires account_key_ref or tenant/client/secret refs")
+		}
 	default:
-		return errors.New("storage.type must be s3, minio, or sftp")
+		return errors.New("storage.type must be s3, minio, sftp, or azure")
 	}
 	if s.Port < 0 || s.Port > 65535 {
 		return errors.New("storage.port must be between 1 and 65535 when set")
@@ -280,12 +322,63 @@ func validateStorage(s Storage) error {
 		{s.SecretAccessKeyRef, "storage.secret_access_key_ref"},
 		{s.UsernameRef, "storage.username_ref"},
 		{s.PasswordRef, "storage.password_ref"},
+		{s.AccountKeyRef, "storage.account_key_ref"},
+		{s.TenantIDRef, "storage.tenant_id_ref"},
+		{s.ClientIDRef, "storage.client_id_ref"},
+		{s.ClientSecretRef, "storage.client_secret_ref"},
 	} {
 		if err := validateReference(ref.value, ref.field, false); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func hasAzureStorageFields(s Storage) bool {
+	return s.Account != "" || s.Container != "" || s.EndpointSuffix != "" ||
+		s.AccountKeyRef != "" || s.TenantIDRef != "" || s.ClientIDRef != "" || s.ClientSecretRef != ""
+}
+
+func validAzureAccount(value string) bool {
+	if len(value) < 3 || len(value) > 24 {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validAzureContainer(value string) bool {
+	if len(value) < 3 || len(value) > 63 || strings.Contains(value, "..") {
+		return false
+	}
+	if value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validAzureEndpointSuffix(value string) bool {
+	if value == "" || len(value) > 253 || strings.Contains(value, "..") || strings.ContainsAny(value, `/:\ `) {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '.' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateDatabases(databases []Database) error {

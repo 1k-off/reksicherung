@@ -2,11 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reksicherung.1node.xyz/schemas/openbao-source.schema.json",
   "title": "OpenBao per-source KV",
-  "description": "KV v2 data at secret/reksicherung/sources/<source_id>.",
+  "description": "KV v2 data at secret/reksicherung/sources/<source_id>. STORAGE_TYPE is required (s3|azure). Auth modes must not be mixed.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"],
+  "required": ["STORAGE_TYPE"],
   "properties": {
+    "STORAGE_TYPE": { "type": "string", "enum": ["s3", "azure"] },
     "S3_ACCESS_KEY_ID": { "type": "string", "minLength": 1 },
     "S3_SECRET_ACCESS_KEY": { "type": "string", "minLength": 1 },
     "S3_ENDPOINT": { "type": "string" },
@@ -14,9 +15,54 @@
     "S3_BUCKET": { "type": "string" },
     "S3_PATH_PREFIX": {
       "type": "string",
-      "description": "Required for gobackup; must end with /"
+      "description": "Required for gobackup+s3; must end with /"
     },
+    "AZURE_ACCOUNT_NAME": { "type": "string", "minLength": 3, "maxLength": 24 },
+    "AZURE_CONTAINER": { "type": "string", "minLength": 3, "maxLength": 63 },
+    "AZURE_PATH_PREFIX": {
+      "type": "string",
+      "description": "Required for gobackup+azure; must end with /"
+    },
+    "AZURE_ENDPOINT_SUFFIX": { "type": "string" },
+    "AZURE_ACCOUNT_KEY": { "type": "string", "minLength": 1 },
+    "AZURE_TENANT_ID": { "type": "string", "minLength": 1 },
+    "AZURE_CLIENT_ID": { "type": "string", "minLength": 1 },
+    "AZURE_CLIENT_SECRET": { "type": "string", "minLength": 1 },
     "RESTIC_REPOSITORY": { "type": "string" },
     "RESTIC_PASSWORD": { "type": "string" }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "STORAGE_TYPE": { "const": "s3" } }, "required": ["STORAGE_TYPE"] },
+      "then": {
+        "required": ["S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"],
+        "not": {
+          "anyOf": [
+            { "required": ["AZURE_ACCOUNT_NAME"] },
+            { "required": ["AZURE_CONTAINER"] },
+            { "required": ["AZURE_ACCOUNT_KEY"] },
+            { "required": ["AZURE_TENANT_ID"] },
+            { "required": ["AZURE_CLIENT_ID"] },
+            { "required": ["AZURE_CLIENT_SECRET"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "STORAGE_TYPE": { "const": "azure" } }, "required": ["STORAGE_TYPE"] },
+      "then": {
+        "required": ["AZURE_ACCOUNT_NAME", "AZURE_CONTAINER"],
+        "not": {
+          "anyOf": [
+            { "required": ["S3_ACCESS_KEY_ID"] },
+            { "required": ["S3_SECRET_ACCESS_KEY"] },
+            { "required": ["S3_ENDPOINT"] },
+            { "required": ["S3_REGION"] },
+            { "required": ["S3_BUCKET"] },
+            { "required": ["S3_PATH_PREFIX"] }
+          ]
+        }
+      }
+    }
+  ]
 }

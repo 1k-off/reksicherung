@@ -14,7 +14,8 @@ Add one database/backup source without editing compose `.env` storage keys.
 2. Append catalog entry (provider, database, selection, cleanup; restic needs
    `backupPath`). Do **not** add `storage` or credential fields.
 3. `bao kv put secret/reksicherung/sources/<id> ...` with required fields for
-   the provider (`docs/schemas/openbao-source-kv.md`).
+   the provider (`docs/schemas/openbao-source-kv.md`). Always set
+   `STORAGE_TYPE=s3` or `STORAGE_TYPE=azure` (required; no default).
 4. `reksicherung validate -config <catalog>`
 5. `reksicherung catalog -config <catalog>` → refresh inventory for the next run.
 6. Optional: dry-run restore-check for that `source_id` only.

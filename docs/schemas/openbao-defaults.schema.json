@@ -2,12 +2,16 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://reksicherung.1node.xyz/schemas/openbao-defaults.schema.json",
   "title": "OpenBao project defaults KV",
-  "description": "KV v2 data at secret/reksicherung/defaults. Optional; merged under each source.",
+  "description": "KV v2 data at secret/reksicherung/defaults. Optional; merged under each source. May set STORAGE_TYPE and shared coordinates.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "STORAGE_TYPE": { "type": "string", "enum": ["s3", "azure"] },
     "S3_ENDPOINT": { "type": "string", "format": "uri" },
     "S3_REGION": { "type": "string", "minLength": 1 },
-    "S3_BUCKET": { "type": "string", "minLength": 3, "maxLength": 63 }
+    "S3_BUCKET": { "type": "string", "minLength": 3, "maxLength": 63 },
+    "AZURE_ACCOUNT_NAME": { "type": "string", "minLength": 3, "maxLength": 24 },
+    "AZURE_CONTAINER": { "type": "string", "minLength": 3, "maxLength": 63 },
+    "AZURE_ENDPOINT_SUFFIX": { "type": "string" }
   }
 }

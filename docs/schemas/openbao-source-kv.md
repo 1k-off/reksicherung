@@ -17,11 +17,13 @@ Project boundary: **one OpenBao** (or dedicated mount/namespace) per restore-che
 1. Load defaults (if present).
 2. Load source path; source fields override defaults.
 3. Fail closed if after merge required fields for the provider are empty.
+4. `STORAGE_TYPE` is required after merge (`s3` or `azure`). Cross-type fields fail closed.
 
-## Example
+## S3 example
 
 ```bash
 bao kv put secret/reksicherung/defaults \
+  STORAGE_TYPE=s3 \
   S3_ENDPOINT=https://fsn1.your-objectstorage.com \
   S3_REGION=fsn1 \
   S3_BUCKET=onsite-backups-general
@@ -30,7 +32,29 @@ bao kv put secret/reksicherung/sources/shop-production \
   S3_ACCESS_KEY_ID=... \
   S3_SECRET_ACCESS_KEY=... \
   S3_PATH_PREFIX=shop/production/
+```
 
+## Azure example (gobackup / account key)
+
+```bash
+bao kv put secret/reksicherung/defaults \
+  STORAGE_TYPE=azure \
+  AZURE_ACCOUNT_NAME=mystorageacct \
+  AZURE_CONTAINER=backups
+
+bao kv put secret/reksicherung/sources/shop-production \
+  AZURE_ACCOUNT_KEY=... \
+  AZURE_PATH_PREFIX=shop/production/
+```
+
+Azure service principal (gobackup Store / configgen) uses `AZURE_TENANT_ID`,
+`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` instead of `AZURE_ACCOUNT_KEY`.
+Restic Azure sources require account key plus `RESTIC_REPOSITORY=azure:<container>:/<prefix>`
+and `RESTIC_PASSWORD`.
+
+## SQL Server
+
+```bash
 bao kv put secret/reksicherung/sqlserver \
   HOST=sqlserver \
   PORT=1433 \

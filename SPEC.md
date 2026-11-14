@@ -53,7 +53,7 @@ Reksicherung owns:
 - Backup configuration generation and validation.
 - Catalog/inventory generation for operators and orchestrators.
 - MCP servers for SQL Server, GoBackup, and Restic, as separate components.
-- Shared storage interfaces and the first S3-compatible implementation.
+- Shared storage interfaces with S3-compatible and Azure Blob implementations.
 - Secret-reference resolution through a provider interface.
 - Run-scoped restore operations and database cleanup/hold-for-review behavior through configured MCP services. Container and service lifecycle remain user-owned.
 - Deterministic restore and validation results plus structured evidence.
@@ -180,6 +180,7 @@ internal/reksicherung/
   secrets/openbao/                    # OpenBao KV v2 provider
   storage/                            # shared storage interface
   storage/s3/                         # S3-compatible implementation
+  storage/azure/                      # Azure Blob implementation
   mcp/sqlserver/                      # SQL Server read-only tool service
   mcp/gobackup/                       # GoBackup discovery service
   mcp/restic/                         # Restic discovery service
@@ -335,7 +336,7 @@ The initial design does not require cryptographic evidence signing or encrypted 
 - Run registry is bbolt on an operator-mounted volume; reconciler default interval is 30s; cleanup is database-scoped only.
 - OpenBao is operator-deployed with persistent storage; MCP processes use a token/AppRole valid for process lifetime (no in-process renewal yet). Reference syntax: `openbao://<mount>/<path>#<key>`.
 - Images are built from `deploy/docker/`; production must pin digests. SQL Server / MCP / OpenBao isolation and network policy are operator-owned.
-- First storage backend is S3-compatible object storage; Restic repositories use the same credential-reference model.
+- Storage backends are S3-compatible object storage and Azure Blob; Restic repositories use the same credential-reference model with `STORAGE_TYPE`.
 - Backup selection: `latest` or explicit ID in catalog; run plans are validated via `internal/reksicherung/plan`.
 - Integrity check: fixed non-repair `DBCC CHECKDB` with package timeouts; semantic review uses bounded read-only SQL MCP tools.
 - `hold_for_review` access/TTL is an operator policy (see `docs/operations.md`); evidence contract is in `docs/evidence.md`.

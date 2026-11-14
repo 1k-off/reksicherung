@@ -4,6 +4,9 @@ previous_work.md
 previous_work.json
 NUL
 
+# Superpowers brainstorm/plan artifacts (local only, never commit)
+docs/superpowers/
+
 # Binaries
 /bin/
 /dist/

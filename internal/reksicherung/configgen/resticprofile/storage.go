@@ -16,9 +16,23 @@ func repositoryURL(storage input.Storage, pathSuffix string) (string, error) {
 	switch strings.ToLower(storage.Type) {
 	case "s3", "minio":
 		return s3RepositoryURL(storage, pathSuffix)
+	case "azure":
+		return azureRepositoryURL(storage, pathSuffix)
 	default:
 		return "", fmt.Errorf("resticprofile: storage.type %q has no repository mapping", storage.Type)
 	}
+}
+
+func azureRepositoryURL(storage input.Storage, pathSuffix string) (string, error) {
+	objectPath := input.JoinStoragePath(storage.PathPrefix, pathSuffix)
+	repo := "azure:" + storage.Container + ":/"
+	if objectPath != "" {
+		repo += objectPath
+		if !strings.HasSuffix(repo, "/") {
+			repo += "/"
+		}
+	}
+	return repo, nil
 }
 
 func s3RepositoryURL(storage input.Storage, pathSuffix string) (string, error) {

@@ -160,6 +160,42 @@ func TestGenerateIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestGenerateAzureAccountKey(t *testing.T) {
+	in := archiveInput()
+	in.Storage = input.Storage{
+		Type:          "azure",
+		Account:       "mystorageacct",
+		Container:     "backups",
+		PathPrefix:    "project",
+		AccountKeyRef: "openbao://secret/reksicherung/azure#key",
+	}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	doc := decodeOutput(t, result.YAML)
+	env := mapAt(t, mapAt(t, doc, "default"), "env")
+	assertEqual(t, env, "AZURE_ACCOUNT_NAME", "mystorageacct")
+	assertEqual(t, env, "AZURE_ACCOUNT_KEY", "$REKSICHERUNG_STORAGE_ACCOUNT_KEY")
+	profile := mapAt(t, doc, "service_name")
+	assertEqual(t, profile, "repository", "azure:backups:/project/")
+}
+
+func TestValidateForProviderRejectsAzureServicePrincipal(t *testing.T) {
+	in := archiveInput()
+	in.Storage = input.Storage{
+		Type:            "azure",
+		Account:         "mystorageacct",
+		Container:       "backups",
+		TenantIDRef:     "openbao://secret/reksicherung/azure#tenant",
+		ClientIDRef:     "openbao://secret/reksicherung/azure#client",
+		ClientSecretRef: "openbao://secret/reksicherung/azure#secret",
+	}
+	if err := ValidateForProvider(in); err == nil {
+		t.Fatal("ValidateForProvider() accepted azure SP")
+	}
+}
+
 func TestRepositoryURLWithoutEndpoint(t *testing.T) {
 	repo, err := repositoryURL(input.Storage{Type: "s3", Bucket: "backups", PathPrefix: "app"}, "")
 	if err != nil {

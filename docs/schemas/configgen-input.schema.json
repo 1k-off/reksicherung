@@ -41,7 +41,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["s3", "minio", "sftp"],
+          "enum": ["s3", "minio", "sftp", "azure"],
           "description": "Extensible discriminator; new backends are added here and in input.Validate"
         },
         "bucket": { "type": "string" },
@@ -53,7 +53,14 @@
         "host": { "type": "string" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "username_ref": { "type": "string", "minLength": 1 },
-        "password_ref": { "type": "string", "minLength": 1 }
+        "password_ref": { "type": "string", "minLength": 1 },
+        "account": { "type": "string", "minLength": 3, "maxLength": 24 },
+        "container": { "type": "string", "minLength": 3, "maxLength": 63 },
+        "endpoint_suffix": { "type": "string" },
+        "account_key_ref": { "type": "string", "minLength": 1 },
+        "tenant_id_ref": { "type": "string", "minLength": 1 },
+        "client_id_ref": { "type": "string", "minLength": 1 },
+        "client_secret_ref": { "type": "string", "minLength": 1 }
       }
     },
     "schedule": {

@@ -23,6 +23,9 @@ func Generate(in input.Input) (Result, error) {
 	if err := in.Validate(); err != nil {
 		return Result{}, err
 	}
+	if err := ValidateForProvider(in); err != nil {
+		return Result{}, err
+	}
 	bindings := input.NewBinder()
 	doc := buildDocument(in, bindings)
 	output, err := yaml.Marshal(doc)
@@ -168,6 +171,12 @@ func buildStorage(storage input.Storage, bindings *input.Binder, pathSuffix stri
 		if storage.SecretAccessKeyRef != "" {
 			result["secret_access_key"] = bindings.Placeholder("storage_secret_access_key", storage.SecretAccessKeyRef)
 		}
+	case "azure":
+		result["account"] = storage.Account
+		result["container"] = storage.Container
+		result["tenant_id"] = bindings.Placeholder("storage_tenant_id", storage.TenantIDRef)
+		result["client_id"] = bindings.Placeholder("storage_client_id", storage.ClientIDRef)
+		result["client_secret"] = bindings.Placeholder("storage_client_secret", storage.ClientSecretRef)
 	case "sftp":
 		result["host"] = storage.Host
 		if storage.Port > 0 {

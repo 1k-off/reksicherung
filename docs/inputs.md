@@ -27,7 +27,7 @@ automation that speaks MCP + skills.
 
 1. Create or edit inputs only against the linked schema and fixtures.
 2. Do not invent environment variables outside `I-COMPOSE-ENV`.
-3. Per-database S3/Restic coordinates live in OpenBao (`I-OPENBAO-SOURCE`), never in compose `.env`.
+3. Per-database S3/Azure/Restic coordinates live in OpenBao (`I-OPENBAO-SOURCE`), never in compose `.env`. `STORAGE_TYPE` (`s3`|`azure`) is required.
 4. SQL connection (`HOST`, `USERNAME`, `PASSWORD`; optional `PORT`) lives in OpenBao (`I-OPENBAO-SQL`), never as ADDRESS/DSN/password-ref env vars.
 5. After changing `I-CATALOG` or OpenBao source KV, run `reksicherung validate` and emit inventory before scheduling a restore-check run.
 6. Fail closed: missing required OpenBao fields or schema violations abort setup/run.
