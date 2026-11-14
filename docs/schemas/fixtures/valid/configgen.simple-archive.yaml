@@ -1,0 +1,19 @@
+project:
+  name: demo-app
+mode: simple
+storage:
+  type: s3
+  bucket: backups-general
+  endpoint: https://objects.example.test
+  path_prefix: demo-app
+  access_key_id_ref: openbao://secret/reksicherung/object-store#access-key
+  secret_access_key_ref: openbao://secret/reksicherung/object-store#secret-key
+schedules:
+  cron: "0 5 * * *"
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#url
+archive:
+  includes:
+    - /var/lib/app
+encryption:
+  enabled: true
+  password_ref: openbao://secret/reksicherung/encryption#password

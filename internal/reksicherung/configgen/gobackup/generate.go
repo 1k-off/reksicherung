@@ -1,102 +1,74 @@
+// Package gobackup generates secret-safe GoBackup configuration from the
+// shared configgen input contract.
 package gobackup
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
+	"github.com/1k-off/reksicherung/internal/reksicherung/configgen/input"
 	"gopkg.in/yaml.v3"
 )
-
-// Binding maps a runtime environment variable to a provider-neutral secret
-// reference. It intentionally contains no resolved secret value.
-type Binding struct {
-	EnvironmentVariable string `json:"environment_variable" yaml:"environment_variable"`
-	SecretReference     string `json:"secret_reference" yaml:"secret_reference"`
-}
 
 // Result contains the generated GoBackup YAML and its runtime secret bindings.
 type Result struct {
 	YAML     []byte
-	Bindings []Binding
-}
-
-type binder struct {
-	bindings []Binding
-	seen     map[string]struct{}
+	Bindings []input.Binding
 }
 
 // Generate validates input and renders deterministic GoBackup YAML. Secret
 // references become runtime $REKSICHERUNG_* placeholders; no secret values
 // are resolved or returned.
-func Generate(input Input) (Result, error) {
-	if err := input.Validate(); err != nil {
+func Generate(in input.Input) (Result, error) {
+	if err := in.Validate(); err != nil {
 		return Result{}, err
 	}
-	bindings := &binder{seen: make(map[string]struct{})}
-	doc := buildDocument(input, bindings)
+	bindings := input.NewBinder()
+	doc := buildDocument(in, bindings)
 	output, err := yaml.Marshal(doc)
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal GoBackup config: %w", err)
 	}
-	sort.Slice(bindings.bindings, func(i, j int) bool {
-		return bindings.bindings[i].EnvironmentVariable < bindings.bindings[j].EnvironmentVariable
-	})
-	return Result{YAML: output, Bindings: bindings.bindings}, nil
+	return Result{YAML: output, Bindings: bindings.Bindings()}, nil
 }
 
-func (b *binder) placeholder(path, reference string) string {
-	if reference == "" {
-		return ""
-	}
-	envName := "REKSICHERUNG_" + strings.ToUpper(stableName(path))
-	if _, exists := b.seen[envName]; !exists {
-		b.seen[envName] = struct{}{}
-		b.bindings = append(b.bindings, Binding{
-			EnvironmentVariable: envName,
-			SecretReference:     reference,
-		})
-	}
-	return "$" + envName
-}
-
-func buildDocument(input Input, bindings *binder) map[string]any {
-	mode := input.Mode
+func buildDocument(in input.Input, bindings *input.Binder) map[string]any {
+	mode := in.Mode
 	if mode == "" {
-		mode = ModeSimple
+		mode = input.ModeSimple
 	}
 	web := map[string]any{
-		"host": defaultString(input.Web.Host, "127.0.0.1"),
-		"port": defaultPort(input.Web.Port, 2703),
+		"host": defaultString(in.Web.Host, "127.0.0.1"),
+		"port": defaultPort(in.Web.Port, 2703),
 	}
 	models := make(map[string]any)
-	projectName := stableName(input.Project.Name)
+	projectName := input.StableName(in.Project.Name)
 	switch mode {
-	case ModeSimple:
+	case input.ModeSimple:
 		models[projectName+"_default"] = buildModel(
-			input,
+			in,
 			bindings,
 			"default",
-			input.Schedules.Cron,
-			defaultKeep(input.Schedules.Keep, 14),
-			input.Schedules.HealthcheckURLRef,
+			in.Schedules.Cron,
+			defaultKeep(in.Schedules.Keep, 14),
+			in.Schedules.HealthcheckURLRef,
 			"",
 			"primary",
 		)
-	case ModeEnhanced:
+	case input.ModeEnhanced:
 		for _, tier := range []struct {
 			name     string
-			schedule *Schedule
+			schedule *input.Schedule
 			keep     int
 		}{
-			{name: "daily", schedule: input.Schedules.Daily, keep: 7},
-			{name: "weekly", schedule: input.Schedules.Weekly, keep: 4},
-			{name: "monthly", schedule: input.Schedules.Monthly, keep: 12},
+			{name: "daily", schedule: in.Schedules.Daily, keep: 7},
+			{name: "weekly", schedule: in.Schedules.Weekly, keep: 4},
+			{name: "monthly", schedule: in.Schedules.Monthly, keep: 12},
 		} {
 			pathSuffix := defaultString(tier.schedule.PathSuffix, tier.name)
 			storageName := defaultString(tier.schedule.StorageName, "s3_"+tier.name)
 			models[projectName+"_"+tier.name] = buildModel(
-				input,
+				in,
 				bindings,
 				tier.name,
 				tier.schedule.Cron,
@@ -111,8 +83,8 @@ func buildDocument(input Input, bindings *binder) map[string]any {
 }
 
 func buildModel(
-	input Input,
-	bindings *binder,
+	in input.Input,
+	bindings *input.Binder,
 	tier string,
 	cron string,
 	keep int,
@@ -120,14 +92,14 @@ func buildModel(
 	pathSuffix string,
 	storageName string,
 ) map[string]any {
-	description := input.Project.Name + " " + tier + " backup"
+	description := in.Project.Name + " " + tier + " backup"
 	if tier == "default" {
-		description = input.Project.Name + " backup"
+		description = in.Project.Name + " backup"
 	}
-	if input.Project.Service != "" && input.Project.Service != input.Project.Name {
-		description = input.Project.Name + " " + input.Project.Service + " " + tier + " backup"
+	if in.Project.Service != "" && in.Project.Service != in.Project.Name {
+		description = in.Project.Name + " " + in.Project.Service + " " + tier + " backup"
 		if tier == "default" {
-			description = input.Project.Name + " " + input.Project.Service + " backup"
+			description = in.Project.Name + " " + in.Project.Service + " backup"
 		}
 	}
 	healthcheckBinding := "schedules_" + tier + "_healthcheck_url"
@@ -140,45 +112,45 @@ func buildModel(
 		"schedule":        map[string]any{"cron": cron},
 		"default_storage": storageName,
 		"storages": map[string]any{
-			storageName: buildStorage(input.Storage, bindings, pathSuffix, keep),
+			storageName: buildStorage(in.Storage, bindings, pathSuffix, keep),
 		},
 		"notifiers": map[string]any{
 			tier: buildNotifier(
-				bindings.placeholder(healthcheckBinding, healthcheckURLRef),
-				input.Notifiers,
+				bindings.Placeholder(healthcheckBinding, healthcheckURLRef),
+				in.Notifiers,
 			),
 		},
 	}
-	if input.Archive != nil {
-		archive := map[string]any{"includes": input.Archive.Includes}
-		if len(input.Archive.Excludes) > 0 {
-			archive["excludes"] = input.Archive.Excludes
+	if in.Archive != nil {
+		archive := map[string]any{"includes": in.Archive.Includes}
+		if len(in.Archive.Excludes) > 0 {
+			archive["excludes"] = in.Archive.Excludes
 		}
 		model["archive"] = archive
 		model["compress_with"] = map[string]any{
-			"type": defaultString(input.Archive.CompressType, "tgz"),
+			"type": defaultString(in.Archive.CompressType, "tgz"),
 		}
 	}
-	if len(input.Databases) > 0 {
-		model["databases"] = buildDatabases(input.Databases, bindings)
+	if len(in.Databases) > 0 {
+		model["databases"] = buildDatabases(in.Databases, bindings)
 	}
-	if input.Encryption.Enabled {
+	if in.Encryption.Enabled {
 		model["encrypt_with"] = map[string]any{
 			"type":     "openssl",
-			"password": bindings.placeholder("encryption_password", input.Encryption.PasswordRef),
-			"salt":     defaultBool(input.Encryption.Salt, true),
-			"base64":   defaultBool(input.Encryption.Base64, false),
+			"password": bindings.Placeholder("encryption_password", in.Encryption.PasswordRef),
+			"salt":     defaultBool(in.Encryption.Salt, true),
+			"base64":   defaultBool(in.Encryption.Base64, false),
 		}
 	}
 	return model
 }
 
-func buildStorage(storage Storage, bindings *binder, pathSuffix string, keep int) map[string]any {
+func buildStorage(storage input.Storage, bindings *input.Binder, pathSuffix string, keep int) map[string]any {
 	result := map[string]any{
 		"type": strings.ToLower(storage.Type),
 		"keep": keep,
 	}
-	if fullPath := storagePath(storage.PathPrefix, pathSuffix); fullPath != "" {
+	if fullPath := input.JoinStoragePath(storage.PathPrefix, pathSuffix); fullPath != "" {
 		result["path"] = fullPath
 	}
 	switch strings.ToLower(storage.Type) {
@@ -191,25 +163,25 @@ func buildStorage(storage Storage, bindings *binder, pathSuffix string, keep int
 			result["endpoint"] = storage.Endpoint
 		}
 		if storage.AccessKeyIDRef != "" {
-			result["access_key_id"] = bindings.placeholder("storage_access_key_id", storage.AccessKeyIDRef)
+			result["access_key_id"] = bindings.Placeholder("storage_access_key_id", storage.AccessKeyIDRef)
 		}
 		if storage.SecretAccessKeyRef != "" {
-			result["secret_access_key"] = bindings.placeholder("storage_secret_access_key", storage.SecretAccessKeyRef)
+			result["secret_access_key"] = bindings.Placeholder("storage_secret_access_key", storage.SecretAccessKeyRef)
 		}
 	case "sftp":
 		result["host"] = storage.Host
 		if storage.Port > 0 {
 			result["port"] = storage.Port
 		}
-		result["username"] = bindings.placeholder("storage_username", storage.UsernameRef)
+		result["username"] = bindings.Placeholder("storage_username", storage.UsernameRef)
 		if storage.PasswordRef != "" {
-			result["password"] = bindings.placeholder("storage_password", storage.PasswordRef)
+			result["password"] = bindings.Placeholder("storage_password", storage.PasswordRef)
 		}
 	}
 	return result
 }
 
-func buildDatabases(databases []Database, bindings *binder) map[string]any {
+func buildDatabases(databases []input.Database, bindings *input.Binder) map[string]any {
 	result := make(map[string]any, len(databases))
 	for _, database := range databases {
 		dbType := strings.ToLower(database.Type)
@@ -217,8 +189,8 @@ func buildDatabases(databases []Database, bindings *binder) map[string]any {
 			"type":     dbType,
 			"host":     database.Host,
 			"database": database.Database,
-			"username": bindings.placeholder("databases_"+database.Name+"_username", database.UsernameRef),
-			"password": bindings.placeholder("databases_"+database.Name+"_password", database.PasswordRef),
+			"username": bindings.Placeholder("databases_"+database.Name+"_username", database.UsernameRef),
+			"password": bindings.Placeholder("databases_"+database.Name+"_password", database.PasswordRef),
 		}
 		if database.Port > 0 {
 			entry["port"] = database.Port
@@ -236,25 +208,12 @@ func buildDatabases(databases []Database, bindings *binder) map[string]any {
 	return result
 }
 
-func buildNotifier(url string, config Notifiers) map[string]any {
+func buildNotifier(url string, config input.Notifiers) map[string]any {
 	return map[string]any{
 		"type":       "healthchecks",
 		"url":        url,
 		"on_success": defaultBool(config.OnSuccess, true),
 		"on_failure": defaultBool(config.OnFailure, true),
-	}
-}
-
-func storagePath(prefix, suffix string) string {
-	prefix = strings.Trim(prefix, "/")
-	suffix = strings.Trim(suffix, "/")
-	switch {
-	case prefix == "":
-		return suffix
-	case suffix == "":
-		return prefix
-	default:
-		return prefix + "/" + suffix
 	}
 }
 

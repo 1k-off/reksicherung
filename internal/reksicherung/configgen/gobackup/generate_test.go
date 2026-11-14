@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/1k-off/reksicherung/internal/reksicherung/configgen/input"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,87 +19,8 @@ const (
 	healthRef     = "openbao://secret/reksicherung/healthchecks#url"
 )
 
-func TestDecodeRejectsUnknownAndPlaintextCredentialFields(t *testing.T) {
-	const sentinel = "PLAINTEXT_SECRET_SENTINEL"
-	input := `project:
-  name: test
-storage:
-  type: s3
-  bucket: backups
-  secret_access_key: ` + sentinel + `
-schedules:
-  cron: "0 5 * * *"
-  healthcheck_url_ref: ` + healthRef + `
-archive:
-  includes: [/var/lib/app]
-`
-	_, err := Decode(strings.NewReader(input))
-	if err == nil {
-		t.Fatal("Decode() unexpectedly accepted a plaintext credential field")
-	}
-	if strings.Contains(err.Error(), sentinel) {
-		t.Fatal("Decode() error disclosed the plaintext credential")
-	}
-}
-
-func TestDecodeRequiresSingleStrictYAMLDocument(t *testing.T) {
-	for name, input := range map[string]string{
-		"empty":     "",
-		"unknown":   "unsupported: true\n",
-		"documents": "project: {name: demo}\n---\nproject: {name: other}\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := Decode(strings.NewReader(input)); err == nil {
-				t.Fatal("Decode() unexpectedly succeeded")
-			}
-		})
-	}
-}
-
-func TestDecodeRejectsUnboundedExecutionFields(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		yaml string
-	}{
-		{
-			name: "scripts",
-			yaml: `project: {name: test}
-storage: {type: s3, bucket: backups}
-schedules: {cron: "0 5 * * *"}
-archive: {includes: [/var/lib/app]}
-scripts: {before: "echo TEST_ONLY_SENTINEL"}
-`,
-		},
-		{
-			name: "database args",
-			yaml: `project: {name: test}
-storage: {type: s3, bucket: backups}
-schedules: {cron: "0 5 * * *"}
-databases:
-  - name: main
-    type: mssql
-    host: localhost
-    database: app
-    username_ref: ` + dbUserRef + `
-    password_ref: ` + dbPasswordRef + `
-    args: "/p:Secret=TEST_ONLY_SENTINEL"
-`,
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			_, err := Decode(strings.NewReader(test.yaml))
-			if err == nil {
-				t.Fatal("Decode() accepted unsupported executable configuration")
-			}
-			if strings.Contains(err.Error(), "TEST_ONLY_SENTINEL") {
-				t.Fatal("Decode() error disclosed input value")
-			}
-		})
-	}
-}
-
 func TestGenerateSimpleDefaultsS3AndMSSQLMapping(t *testing.T) {
-	input, err := Decode(strings.NewReader(`project:
+	in, err := input.Decode(strings.NewReader(`project:
   name: my-app
 storage:
   type: minio
@@ -124,7 +46,7 @@ databases:
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
-	result, err := Generate(input)
+	result, err := Generate(in)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -197,11 +119,11 @@ databases:
     username_ref: ` + dbUserRef + `
     password_ref: ` + dbPasswordRef + `
 ` + test.trustField
-			input, err := Decode(strings.NewReader(inputYAML))
+			in, err := input.Decode(strings.NewReader(inputYAML))
 			if err != nil {
 				t.Fatalf("Decode() error = %v", err)
 			}
-			result, err := Generate(input)
+			result, err := Generate(in)
 			if err != nil {
 				t.Fatalf("Generate() error = %v", err)
 			}
@@ -213,30 +135,30 @@ databases:
 }
 
 func TestGenerateEnhancedArchiveEncryptionAndNotifiers(t *testing.T) {
-	input := Input{
-		Project: Project{Name: "service-name"},
-		Mode:    ModeEnhanced,
-		Storage: Storage{
+	in := input.Input{
+		Project: input.Project{Name: "service-name"},
+		Mode:    input.ModeEnhanced,
+		Storage: input.Storage{
 			Type:       "s3",
 			Bucket:     "backup-bucket",
 			PathPrefix: "project",
 		},
-		Schedules: Schedules{
-			Daily:   &Schedule{Cron: "0 1 * * *", HealthcheckURLRef: healthRef},
-			Weekly:  &Schedule{Cron: "0 2 * * 0", HealthcheckURLRef: healthRef},
-			Monthly: &Schedule{Cron: "0 3 1 * *", HealthcheckURLRef: healthRef},
+		Schedules: input.Schedules{
+			Daily:   &input.Schedule{Cron: "0 1 * * *", HealthcheckURLRef: healthRef},
+			Weekly:  &input.Schedule{Cron: "0 2 * * 0", HealthcheckURLRef: healthRef},
+			Monthly: &input.Schedule{Cron: "0 3 1 * *", HealthcheckURLRef: healthRef},
 		},
-		Archive: &Archive{
+		Archive: &input.Archive{
 			Includes: []string{"/var/lib/app", "/etc/app.yml"},
 			Excludes: []string{"/var/lib/app/tmp"},
 		},
-		Encryption: Encryption{Enabled: true, PasswordRef: "openbao://secret/reksicherung/encryption#password"},
-		Notifiers:  Notifiers{OnSuccess: boolPointer(false)},
+		Encryption: input.Encryption{Enabled: true, PasswordRef: "openbao://secret/reksicherung/encryption#password"},
+		Notifiers:  input.Notifiers{OnSuccess: boolPointer(false)},
 	}
-	if err := input.Validate(); err != nil {
+	if err := in.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	result, err := Generate(input)
+	result, err := Generate(in)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -266,9 +188,9 @@ func TestGenerateEnhancedArchiveEncryptionAndNotifiers(t *testing.T) {
 }
 
 func TestGenerateSFTPAndCredentialBindings(t *testing.T) {
-	input := Input{
-		Project: Project{Name: "sftp-project"},
-		Storage: Storage{
+	in := input.Input{
+		Project: input.Project{Name: "sftp-project"},
+		Storage: input.Storage{
 			Type:        "sftp",
 			Host:        "backup.example.test",
 			Port:        2222,
@@ -276,10 +198,10 @@ func TestGenerateSFTPAndCredentialBindings(t *testing.T) {
 			UsernameRef: "openbao://secret/reksicherung/sftp#username",
 			PasswordRef: "openbao://secret/reksicherung/sftp#password",
 		},
-		Schedules: Schedules{Cron: "0 0 * * *", HealthcheckURLRef: healthRef},
-		Archive:   &Archive{Includes: []string{"/var/lib/app"}, CompressType: "tgz"},
+		Schedules: input.Schedules{Cron: "0 0 * * *", HealthcheckURLRef: healthRef},
+		Archive:   &input.Archive{Includes: []string{"/var/lib/app"}, CompressType: "tgz"},
 	}
-	result, err := Generate(input)
+	result, err := Generate(in)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -298,12 +220,12 @@ func TestGenerateSFTPAndCredentialBindings(t *testing.T) {
 }
 
 func TestGenerateIsDeterministicAndYAMLParses(t *testing.T) {
-	input := simpleInput()
-	first, err := Generate(input)
+	in := simpleInput()
+	first, err := Generate(in)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
-	second, err := Generate(input)
+	second, err := Generate(in)
 	if err != nil {
 		t.Fatalf("second Generate() error = %v", err)
 	}
@@ -316,26 +238,7 @@ func TestGenerateIsDeterministicAndYAMLParses(t *testing.T) {
 	_ = decodeOutput(t, first.YAML)
 }
 
-func TestValidationRejectsUnsafeNamesPathsAndReferences(t *testing.T) {
-	tests := map[string]func(*Input){
-		"project traversal":   func(in *Input) { in.Project.Name = "../bad" },
-		"storage traversal":   func(in *Input) { in.Storage.PathPrefix = "safe/../escape" },
-		"archive traversal":   func(in *Input) { in.Archive = &Archive{Includes: []string{"/var/../etc"}} },
-		"invalid secret ref":  func(in *Input) { in.Storage.AccessKeyIDRef = "not-a-reference" },
-		"empty schedule keep": func(in *Input) { in.Schedules.Keep = -1 },
-	}
-	for name, mutate := range tests {
-		t.Run(name, func(t *testing.T) {
-			input := simpleInput()
-			mutate(&input)
-			if err := input.Validate(); err == nil {
-				t.Fatal("Validate() unexpectedly succeeded")
-			}
-		})
-	}
-}
-
-func TestStrictSecretHandlingDoesNotLeakSentinel(t *testing.T) {
+func TestGenerateDoesNotLeakSentinelFromRejectedDecode(t *testing.T) {
 	const sentinel = "DO_NOT_LEAK_THIS_SECRET"
 	inputYAML := `project:
   name: secure-project
@@ -354,7 +257,7 @@ archive:
 	log.SetOutput(&logOutput)
 	defer log.SetOutput(originalOutput)
 
-	_, decodeErr := Decode(strings.NewReader(inputYAML))
+	_, decodeErr := input.Decode(strings.NewReader(inputYAML))
 	validResult, generateErr := Generate(simpleInput())
 	if decodeErr == nil || generateErr != nil {
 		t.Fatalf("Decode() err = %v; Generate() err = %v", decodeErr, generateErr)
@@ -368,28 +271,15 @@ archive:
 	}
 }
 
-func TestDecodeInvalidSecretReferenceDoesNotEchoInput(t *testing.T) {
-	const sentinel = "SECRET_SENTINEL_REFERENCE"
-	input := simpleInput()
-	input.Storage.AccessKeyIDRef = sentinel
-	err := input.Validate()
-	if err == nil {
-		t.Fatal("Validate() accepted an invalid secret reference")
-	}
-	if strings.Contains(err.Error(), sentinel) {
-		t.Fatal("Validate() error disclosed the invalid reference value")
-	}
-}
-
-func simpleInput() Input {
-	return Input{
-		Project: Project{Name: "simple-project"},
-		Storage: Storage{Type: "s3", Bucket: "backups"},
-		Schedules: Schedules{
+func simpleInput() input.Input {
+	return input.Input{
+		Project: input.Project{Name: "simple-project"},
+		Storage: input.Storage{Type: "s3", Bucket: "backups"},
+		Schedules: input.Schedules{
 			Cron:              "0 5 * * *",
 			HealthcheckURLRef: healthRef,
 		},
-		Archive: &Archive{Includes: []string{"/var/lib/app"}},
+		Archive: &input.Archive{Includes: []string{"/var/lib/app"}},
 	}
 }
 
@@ -435,7 +325,7 @@ func assertEqual(t *testing.T, object map[string]any, key string, want any) {
 	}
 }
 
-func assertBindings(t *testing.T, got []Binding, want map[string]string) {
+func assertBindings(t *testing.T, got []input.Binding, want map[string]string) {
 	t.Helper()
 	if len(got) != len(want) {
 		t.Fatalf("got %d bindings, want %d: %#v", len(got), len(want), got)

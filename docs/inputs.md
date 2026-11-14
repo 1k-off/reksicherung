@@ -17,6 +17,7 @@ Machine-readable schemas: [`schemas/`](schemas/) · index: [`schemas/README.md`]
 | `I-PROMPT` | restore-check request text | AI/operator | [`restore-check-prompt.md`](schemas/restore-check-prompt.md) | skill review | `reksicherung-restore-check` |
 | `I-MCP-TOOLS` | MCP tool args/results | product | [`mcp-tools.schema.json`](schemas/mcp-tools.schema.json) | MCP SDK / tests | all run skills |
 | `I-EVIDENCE` | evidence JSONL events | product | [`evidence-event.v1.schema.json`](schemas/evidence-event.v1.schema.json) | runtime Validate | `reksicherung-operate` |
+| `I-CONFIGGEN` | backup-as-code YAML for generators | AI/operator | [`configgen-input.schema.json`](schemas/configgen-input.schema.json) | `input.Decode` / `input.Validate` | optional configgen (gobackup, resticprofile) |
 
 Airon is **not** required. `examples/airon/` is one optional binding of
 `I-ORCHESTRATOR-JOB`. Operators may drive MCP tools manually or via any other

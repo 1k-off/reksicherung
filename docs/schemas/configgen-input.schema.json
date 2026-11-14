@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reksicherung.1node.xyz/schemas/configgen-input.schema.json",
+  "title": "Configgen backup-as-code input (I-CONFIGGEN)",
+  "description": "Shared YAML contract for configgen/gobackup and configgen/resticprofile. Credentials are *_ref secret references only. storage.type is an extensible discriminator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project", "storage", "schedules"],
+  "properties": {
+    "project": { "$ref": "#/$defs/project" },
+    "mode": { "type": "string", "enum": ["simple", "enhanced"] },
+    "storage": { "$ref": "#/$defs/storage" },
+    "schedules": { "$ref": "#/$defs/schedules" },
+    "databases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/database" }
+    },
+    "archive": { "$ref": "#/$defs/archive" },
+    "encryption": { "$ref": "#/$defs/encryption" },
+    "notifiers": { "$ref": "#/$defs/notifiers" },
+    "web": { "$ref": "#/$defs/web" }
+  },
+  "anyOf": [
+    { "required": ["databases"] },
+    { "required": ["archive"] }
+  ],
+  "$defs": {
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "service": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["s3", "minio", "sftp"],
+          "description": "Extensible discriminator; new backends are added here and in input.Validate"
+        },
+        "bucket": { "type": "string" },
+        "region": { "type": "string" },
+        "endpoint": { "type": "string", "format": "uri" },
+        "path_prefix": { "type": "string" },
+        "access_key_id_ref": { "type": "string", "minLength": 1 },
+        "secret_access_key_ref": { "type": "string", "minLength": 1 },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "username_ref": { "type": "string", "minLength": 1 },
+        "password_ref": { "type": "string", "minLength": 1 }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cron", "healthcheck_url_ref"],
+      "properties": {
+        "cron": { "type": "string", "minLength": 1 },
+        "keep": { "type": "integer", "minimum": 0 },
+        "healthcheck_url_ref": { "type": "string", "minLength": 1 },
+        "path_suffix": { "type": "string" },
+        "storage_name": { "type": "string" }
+      }
+    },
+    "schedules": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cron": { "type": "string" },
+        "keep": { "type": "integer", "minimum": 0 },
+        "healthcheck_url_ref": { "type": "string" },
+        "daily": { "$ref": "#/$defs/schedule" },
+        "weekly": { "$ref": "#/$defs/schedule" },
+        "monthly": { "$ref": "#/$defs/schedule" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "host", "database", "username_ref", "password_ref"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "type": { "type": "string", "enum": ["mssql", "postgresql", "mysql"] },
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "database": { "type": "string", "minLength": 1 },
+        "username_ref": { "type": "string", "minLength": 1 },
+        "password_ref": { "type": "string", "minLength": 1 },
+        "trust_server_certificate": { "type": "boolean" },
+        "ignore_schema_check": { "type": "boolean" }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["includes"],
+      "properties": {
+        "includes": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "excludes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "compress_type": { "type": "string" }
+      }
+    },
+    "encryption": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "password_ref": { "type": "string", "minLength": 1 },
+        "salt": { "type": "boolean" },
+        "base64": { "type": "boolean" }
+      }
+    },
+    "notifiers": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "on_success": { "type": "boolean" },
+        "on_failure": { "type": "boolean" }
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    }
+  }
+}

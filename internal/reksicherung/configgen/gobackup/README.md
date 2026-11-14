@@ -1,9 +1,10 @@
 # GoBackup configuration generator
 
-This package adapts the backup-as-code model of
-`infrastructure/utils/gobackup-config-generator` into the Reksicherung module.
-Use `Decode` for strict YAML input, `Input.Validate` for checks, and `Generate`
-for deterministic GoBackup YAML plus a runtime binding manifest.
+Renders GoBackup YAML from the shared backup-as-code contract in
+`internal/reksicherung/configgen/input` (`I-CONFIGGEN`).
+
+Use `input.Decode` / `input.Input.Validate`, then `Generate` for deterministic
+GoBackup YAML plus a runtime binding manifest.
 
 Credential inputs must be `*_ref` values accepted by
 `internal/reksicherung/secrets.ParseReference`. Generated YAML contains

@@ -85,7 +85,7 @@ Implementations described in `onsite-infrastructure`, `infrastructure`, and opti
 
 ### Phase 2 — common backup configuration model
 
-- Add a Restic configuration generator using the same canonical YAML model as GoBackup.
+- Extend resticprofile generator coverage (additional storage backends, database dump hooks when explicitly designed).
 - Improve validation and compatibility tests across generator and inventory outputs.
 
 ### Later, explicitly not required for the first release
@@ -137,11 +137,12 @@ The catalog schema is versioned as `reksicherung.1node.xyz/v1alpha2` with `kind:
 - Validate generated output and make generation deterministic where practical.
 - Account for GoBackup's SQL Server plugin producing `.bacpac` exports via SqlPackage: the restore workflow must import the artifact into the isolated SQL Server using a compatible SqlPackage execution environment, not treat the artifact as a native SQL Server `.bak`.
 
-### Restic generator
+### Restic / resticprofile generator
 
 - Restic MCP/restore support is in the first usable scope.
-- A Restic configuration generator is a later phase.
-- It should consume the same canonical YAML model as the GoBackup generator rather than introduce a separate project-level schema.
+- The configuration generator lives in `configgen/resticprofile` and emits resticprofile v1 YAML plus secret bindings.
+- It consumes the same canonical YAML model as the GoBackup generator (`I-CONFIGGEN` / `configgen/input`) rather than a separate project-level schema.
+- Provider-specific fields that cannot be mapped are rejected by `ValidateForProvider` (strict subset).
 
 ### Catalog/inventory
 
@@ -183,7 +184,9 @@ internal/reksicherung/
   mcp/gobackup/                       # GoBackup discovery service
   mcp/restic/                         # Restic discovery service
   mcp/reksicherung/                   # high-level restore-check MCP surface
+  configgen/input/                    # shared I-CONFIGGEN YAML model
   configgen/gobackup/                 # optional GoBackup generator
+  configgen/resticprofile/            # optional resticprofile generator
 skills/reksicherung-restore-check/
   SKILL.md                            # restore/check skill runbook
 examples/compose/                     # operator Docker Compose reference
@@ -308,7 +311,7 @@ The initial design does not require cryptographic evidence signing or encrypted 
 6. Normal mode attempts to drop the run-scoped database; human-review mode retains it and provides cleanup details. Neither mode changes service/container lifecycle.
 7. The orchestrator JSON run log and Reksicherung evidence can be correlated by run ID and include the steps, results, cleanup outcome, and available token usage.
 8. Secret values do not appear in generated configs, inventory, logs, or evidence.
-9. The GoBackup generator is based on the generic infrastructure generator, and the future Restic generator is designed to share the canonical YAML model.
+9. The GoBackup and resticprofile generators share the canonical `I-CONFIGGEN` YAML model in `configgen/input`.
 10. SQL Server, GoBackup, Restic, and shared storage responsibilities remain independently testable packages.
 
 ## 17. Confirmed implementation baseline

@@ -1,5 +1,6 @@
-// Package gobackup decodes and generates secret-safe GoBackup configuration.
-package gobackup
+// Package input defines the shared backup-as-code YAML contract (I-CONFIGGEN)
+// used by config generators such as gobackup and resticprofile.
+package input
 
 import (
 	"errors"
@@ -298,7 +299,7 @@ func validateDatabases(databases []Database) error {
 			return fmt.Errorf("databases[%d].name is duplicated", i)
 		}
 		seen[db.Name] = struct{}{}
-		generatedName := stableName(db.Name)
+		generatedName := StableName(db.Name)
 		if _, ok := outputNames[generatedName]; ok {
 			return fmt.Errorf("databases[%d].name collides with another generated name", i)
 		}
@@ -456,7 +457,9 @@ func safeText(value string) bool {
 	return true
 }
 
-func stableName(value string) string {
+// StableName normalizes a human label into a lowercase underscore token for
+// generated keys and environment-variable path segments.
+func StableName(value string) string {
 	var b strings.Builder
 	underscore := false
 	for _, r := range strings.ToLower(value) {
@@ -471,4 +474,19 @@ func stableName(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "_")
+}
+
+// JoinStoragePath joins optional prefix and suffix path segments without
+// introducing empty or duplicated slashes.
+func JoinStoragePath(prefix, suffix string) string {
+	prefix = strings.Trim(prefix, "/")
+	suffix = strings.Trim(suffix, "/")
+	switch {
+	case prefix == "":
+		return suffix
+	case suffix == "":
+		return prefix
+	default:
+		return prefix + "/" + suffix
+	}
 }

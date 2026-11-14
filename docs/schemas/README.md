@@ -14,6 +14,7 @@ JSON Schema drafts and markdown contracts for every Reksicherung input.
 | `restore-check-prompt.md` | I-PROMPT |
 | `mcp-tools.schema.json` | I-MCP-TOOLS |
 | `evidence-event.v1.schema.json` | I-EVIDENCE |
+| `configgen-input.schema.json` | I-CONFIGGEN |
 | `openbao-source-kv.md` | human/AI convention notes |
 
 Fixtures: `fixtures/valid/` and `fixtures/invalid/`.
