@@ -175,7 +175,7 @@ func TestResolveSourceAzureKeyAndServicePrincipal(t *testing.T) {
 		}
 	})
 
-	t.Run("restic requires account key and azure repo", func(t *testing.T) {
+	t.Run("restic requires account key or SAS and azure repo", func(t *testing.T) {
 		fields := cloneMap(base)
 		fields[FieldAzureTenantID] = "tenant"
 		fields[FieldAzureClientID] = "client"
@@ -197,6 +197,31 @@ func TestResolveSourceAzureKeyAndServicePrincipal(t *testing.T) {
 			t.Fatalf("key restic error = %v", err)
 		}
 		material.Clear()
+
+		fields = cloneMap(base)
+		fields[FieldAzureAccountSAS] = "sv=2024&sig=abc"
+		fields[FieldResticRepository] = "azure:backups:/shop/"
+		fields[FieldResticPassword] = "pass"
+		provider = mapProvider{SourcesPathPrefix + "shop": fields}
+		material, err = ResolveSource(context.Background(), provider, "shop", "restic")
+		if err != nil {
+			t.Fatalf("sas restic error = %v", err)
+		}
+		material.Clear()
+	})
+
+	t.Run("sas gobackup", func(t *testing.T) {
+		fields := cloneMap(base)
+		fields[FieldAzureAccountSAS] = "?sv=2024&sig=abc"
+		provider := mapProvider{SourcesPathPrefix + "shop": fields}
+		material, err := ResolveSource(context.Background(), provider, "shop", "gobackup")
+		if err != nil {
+			t.Fatalf("error = %v", err)
+		}
+		defer material.Clear()
+		if string(material.AzureAccountSAS) != "?sv=2024&sig=abc" {
+			t.Fatalf("sas = %q", material.AzureAccountSAS)
+		}
 	})
 }
 

@@ -181,6 +181,32 @@ func TestGenerateAzureAccountKey(t *testing.T) {
 	assertEqual(t, profile, "repository", "azure:backups:/project/")
 }
 
+func TestGenerateAzureAccountSAS(t *testing.T) {
+	in := archiveInput()
+	in.Storage = input.Storage{
+		Type:          "azure",
+		Account:       "mystorageacct",
+		Container:     "shop",
+		PathPrefix:    "project",
+		AccountSASRef: "openbao://secret/reksicherung/azure#sas",
+	}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	env := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "default"), "env")
+	assertEqual(t, env, "AZURE_ACCOUNT_NAME", "mystorageacct")
+	assertEqual(t, env, "AZURE_ACCOUNT_SAS", "$REKSICHERUNG_STORAGE_ACCOUNT_SAS")
+	if _, ok := env["AZURE_ACCOUNT_KEY"]; ok {
+		t.Fatal("unexpected AZURE_ACCOUNT_KEY with SAS")
+	}
+	assertBindings(t, result.Bindings, map[string]string{
+		"REKSICHERUNG_ENCRYPTION_PASSWORD":       encryptionRef,
+		"REKSICHERUNG_SCHEDULES_HEALTHCHECK_URL": healthRef,
+		"REKSICHERUNG_STORAGE_ACCOUNT_SAS":       "openbao://secret/reksicherung/azure#sas",
+	})
+}
+
 func TestValidateForProviderRejectsAzureServicePrincipal(t *testing.T) {
 	in := archiveInput()
 	in.Storage = input.Storage{

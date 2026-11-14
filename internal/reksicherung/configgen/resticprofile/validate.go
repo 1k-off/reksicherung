@@ -40,8 +40,10 @@ func ValidateForProvider(in input.Input) error {
 	switch strings.ToLower(in.Storage.Type) {
 	case "s3", "minio":
 	case "azure":
-		if in.Storage.AccountKeyRef == "" {
-			return errors.New("resticprofile: azure requires account_key_ref")
+		hasKey := in.Storage.AccountKeyRef != ""
+		hasSAS := in.Storage.AccountSASRef != ""
+		if hasKey == hasSAS {
+			return errors.New("resticprofile: azure requires exactly one of account_key_ref or account_sas_ref")
 		}
 		if in.Storage.TenantIDRef != "" || in.Storage.ClientIDRef != "" || in.Storage.ClientSecretRef != "" {
 			return errors.New("resticprofile: azure service principal refs are not supported")

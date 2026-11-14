@@ -43,7 +43,12 @@ func buildDocument(in input.Input, bindings *input.Binder) (map[string]any, erro
 	switch strings.ToLower(in.Storage.Type) {
 	case "azure":
 		env["AZURE_ACCOUNT_NAME"] = in.Storage.Account
-		env["AZURE_ACCOUNT_KEY"] = bindings.Placeholder("storage_account_key", in.Storage.AccountKeyRef)
+		if in.Storage.AccountKeyRef != "" {
+			env["AZURE_ACCOUNT_KEY"] = bindings.Placeholder("storage_account_key", in.Storage.AccountKeyRef)
+		}
+		if in.Storage.AccountSASRef != "" {
+			env["AZURE_ACCOUNT_SAS"] = bindings.Placeholder("storage_account_sas", in.Storage.AccountSASRef)
+		}
 		if in.Storage.EndpointSuffix != "" {
 			env["AZURE_ENDPOINT_SUFFIX"] = in.Storage.EndpointSuffix
 		}

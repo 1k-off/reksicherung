@@ -37,6 +37,7 @@ type Config struct {
 	EndpointSuffix string
 
 	AccountKey   string
+	AccountSAS   string
 	TenantID     string
 	ClientID     string
 	ClientSecret string
@@ -66,7 +67,7 @@ type Client struct {
 
 var _ storage.Store = (*Client)(nil)
 
-// New constructs an Azure Blob client using account key or service principal.
+// New constructs an Azure Blob client using account key, SAS, or service principal.
 func New(config Config) (*Client, error) {
 	backend, err := newSDKBackend(config)
 	if err != nil {
@@ -107,37 +108,59 @@ func newSDKBackend(config Config) (blobBackend, error) {
 	}
 
 	hasKey := strings.TrimSpace(config.AccountKey) != ""
+	hasSAS := strings.TrimSpace(config.AccountSAS) != ""
 	hasSP := config.TenantID != "" || config.ClientID != "" || config.ClientSecret != ""
 	completeSP := config.TenantID != "" && config.ClientID != "" && config.ClientSecret != ""
-	serviceURL := fmt.Sprintf("https://%s.blob.%s/", config.AccountName, suffix)
-
-	var service *azblob.Client
-	switch {
-	case hasKey && hasSP:
+	modes := 0
+	if hasKey {
+		modes++
+	}
+	if hasSAS {
+		modes++
+	}
+	if hasSP {
+		modes++
+	}
+	if modes != 1 {
 		return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
+	}
+
+	serviceURL := fmt.Sprintf("https://%s.blob.%s/", config.AccountName, suffix)
+	switch {
 	case hasKey:
 		cred, err := azblob.NewSharedKeyCredential(config.AccountName, config.AccountKey)
 		if err != nil {
 			return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
 		}
-		service, err = azblob.NewClientWithSharedKeyCredential(serviceURL, cred, nil)
+		service, err := azblob.NewClientWithSharedKeyCredential(serviceURL, cred, nil)
 		if err != nil {
 			return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
 		}
+		return &sdkBackend{container: service.ServiceClient().NewContainerClient(config.Container)}, nil
+	case hasSAS:
+		sas := strings.TrimPrefix(strings.TrimSpace(config.AccountSAS), "?")
+		if sas == "" {
+			return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
+		}
+		containerURL := fmt.Sprintf("https://%s.blob.%s/%s?%s", config.AccountName, suffix, config.Container, sas)
+		containerClient, err := container.NewClientWithNoCredential(containerURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
+		}
+		return &sdkBackend{container: containerClient}, nil
 	case completeSP:
 		cred, err := azidentity.NewClientSecretCredential(config.TenantID, config.ClientID, config.ClientSecret, nil)
 		if err != nil {
 			return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
 		}
-		service, err = azblob.NewClient(serviceURL, cred, nil)
+		service, err := azblob.NewClient(serviceURL, cred, nil)
 		if err != nil {
 			return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
 		}
+		return &sdkBackend{container: service.ServiceClient().NewContainerClient(config.Container)}, nil
 	default:
 		return nil, fmt.Errorf("storage azure: %w", storage.ErrInvalidInput)
 	}
-
-	return &sdkBackend{container: service.ServiceClient().NewContainerClient(config.Container)}, nil
 }
 
 type sdkBackend struct {

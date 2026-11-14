@@ -11,11 +11,15 @@ Supported subset (v1):
 - Simple and enhanced schedules with forget retention and healthcheck hooks
 - S3 / MinIO repositories (`repositoryURL` helper is isolated for future
   storage backends)
+- Azure Blob via `azure:<container>:/<path>` with exactly one of
+  `account_key_ref` → `AZURE_ACCOUNT_KEY` or `account_sas_ref` →
+  `AZURE_ACCOUNT_SAS`
 - File archive sources (`archive.includes` / `excludes`)
 - Repository password via `encryption.password_ref` → `RESTIC_PASSWORD` binding
 
-Rejected: databases, web, sftp, `archive.compress_type`, openssl
-`encryption.salt` / `encryption.base64`, missing archive or password.
+Rejected: databases, web, sftp, azure service principal refs,
+`archive.compress_type`, openssl `encryption.salt` / `encryption.base64`,
+missing archive or password.
 
 This package never resolves secret references, writes files, or emits deploy
 scripts.

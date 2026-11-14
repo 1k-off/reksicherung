@@ -25,6 +25,11 @@
     },
     "AZURE_ENDPOINT_SUFFIX": { "type": "string" },
     "AZURE_ACCOUNT_KEY": { "type": "string", "minLength": 1 },
+    "AZURE_ACCOUNT_SAS": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Container- or account-level SAS query (optional leading ?). Prefer for per-container isolation without N app registrations."
+    },
     "AZURE_TENANT_ID": { "type": "string", "minLength": 1 },
     "AZURE_CLIENT_ID": { "type": "string", "minLength": 1 },
     "AZURE_CLIENT_SECRET": { "type": "string", "minLength": 1 },

@@ -34,23 +34,28 @@ bao kv put secret/reksicherung/sources/shop-production \
   S3_PATH_PREFIX=shop/production/
 ```
 
-## Azure example (gobackup / account key)
+## Azure auth (exactly one mode)
+
+| Mode | Fields | Typical use |
+| --- | --- | --- |
+| SAS | `AZURE_ACCOUNT_SAS` | Per-container isolation without N app registrations (restic + MCP Store) |
+| Account key | `AZURE_ACCOUNT_KEY` | Whole storage account access |
+| Service principal | `AZURE_TENANT_ID` + `AZURE_CLIENT_ID` + `AZURE_CLIENT_SECRET` | GoBackup configgen / Store with RBAC |
 
 ```bash
 bao kv put secret/reksicherung/defaults \
   STORAGE_TYPE=azure \
-  AZURE_ACCOUNT_NAME=mystorageacct \
-  AZURE_CONTAINER=backups
+  AZURE_ACCOUNT_NAME=mystorageacct
 
 bao kv put secret/reksicherung/sources/shop-production \
-  AZURE_ACCOUNT_KEY=... \
-  AZURE_PATH_PREFIX=shop/production/
+  AZURE_CONTAINER=shop \
+  AZURE_ACCOUNT_SAS='sv=...&sig=...' \
+  AZURE_PATH_PREFIX=production/
 ```
 
-Azure service principal (gobackup Store / configgen) uses `AZURE_TENANT_ID`,
-`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` instead of `AZURE_ACCOUNT_KEY`.
-Restic Azure sources require account key plus `RESTIC_REPOSITORY=azure:<container>:/<prefix>`
-and `RESTIC_PASSWORD`.
+Restic Azure sources need `RESTIC_REPOSITORY=azure:<container>:/<prefix>`,
+`RESTIC_PASSWORD`, and either `AZURE_ACCOUNT_KEY` or `AZURE_ACCOUNT_SAS`
+(not SP-only). GoBackup configgen still maps Azure via service principal only.
 
 ## SQL Server
 

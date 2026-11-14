@@ -58,6 +58,7 @@
         "container": { "type": "string", "minLength": 3, "maxLength": 63 },
         "endpoint_suffix": { "type": "string" },
         "account_key_ref": { "type": "string", "minLength": 1 },
+        "account_sas_ref": { "type": "string", "minLength": 1 },
         "tenant_id_ref": { "type": "string", "minLength": 1 },
         "client_id_ref": { "type": "string", "minLength": 1 },
         "client_secret_ref": { "type": "string", "minLength": 1 }

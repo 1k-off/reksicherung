@@ -136,19 +136,31 @@ func resticStorageEnvironment(material secrets.SourceMaterial, cacheDir string) 
 		}
 		return environment, restoreEnv, nil
 	case secrets.StorageTypeAzure:
-		if len(material.AzureAccountKey) == 0 {
-			return nil, nil, errors.New("azure restic sources require AZURE_ACCOUNT_KEY")
+		hasKey := len(material.AzureAccountKey) > 0
+		hasSAS := len(material.AzureAccountSAS) > 0
+		if hasKey == hasSAS {
+			return nil, nil, errors.New("azure restic sources require exactly one of AZURE_ACCOUNT_KEY or AZURE_ACCOUNT_SAS")
 		}
 		environment := append([]string{
 			"AZURE_ACCOUNT_NAME=" + material.AzureAccountName,
-			"AZURE_ACCOUNT_KEY=" + string(material.AzureAccountKey),
 		}, cacheEnv...)
 		restoreEnv := []resticrestore.EnvironmentVariable{
 			{Name: "RESTIC_PASSWORD", Value: string(material.ResticPassword)},
 			{Name: "AZURE_ACCOUNT_NAME", Value: material.AzureAccountName},
-			{Name: "AZURE_ACCOUNT_KEY", Value: string(material.AzureAccountKey)},
 			{Name: "RESTIC_CACHE_DIR", Value: cacheDir},
 			{Name: "XDG_CACHE_HOME", Value: cacheDir},
+		}
+		if hasKey {
+			environment = append(environment, "AZURE_ACCOUNT_KEY="+string(material.AzureAccountKey))
+			restoreEnv = append(restoreEnv, resticrestore.EnvironmentVariable{
+				Name: "AZURE_ACCOUNT_KEY", Value: string(material.AzureAccountKey),
+			})
+		} else {
+			sas := strings.TrimPrefix(string(material.AzureAccountSAS), "?")
+			environment = append(environment, "AZURE_ACCOUNT_SAS="+sas)
+			restoreEnv = append(restoreEnv, resticrestore.EnvironmentVariable{
+				Name: "AZURE_ACCOUNT_SAS", Value: sas,
+			})
 		}
 		if material.AzureEndpointSuffix != "" {
 			environment = append(environment, "AZURE_ENDPOINT_SUFFIX="+material.AzureEndpointSuffix)

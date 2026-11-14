@@ -119,4 +119,14 @@ func TestNewRejectsMixedCredentials(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid input") && !errors.Is(err, storage.ErrInvalidInput) {
 		t.Fatalf("error = %v", err)
 	}
+
+	_, err = New(Config{
+		AccountName: "mystorageacct",
+		Container:   "backups",
+		AccountKey:  "key",
+		AccountSAS:  "sv=1&sig=x",
+	})
+	if err == nil {
+		t.Fatal("New() accepted key+SAS together")
+	}
 }

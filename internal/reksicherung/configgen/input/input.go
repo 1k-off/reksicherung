@@ -60,6 +60,7 @@ type Storage struct {
 	Container          string `yaml:"container,omitempty"`
 	EndpointSuffix     string `yaml:"endpoint_suffix,omitempty"`
 	AccountKeyRef      string `yaml:"account_key_ref,omitempty"`
+	AccountSASRef      string `yaml:"account_sas_ref,omitempty"`
 	TenantIDRef        string `yaml:"tenant_id_ref,omitempty"`
 	ClientIDRef        string `yaml:"client_id_ref,omitempty"`
 	ClientSecretRef    string `yaml:"client_secret_ref,omitempty"`
@@ -293,17 +294,29 @@ func validateStorage(s Storage) error {
 			return errors.New("storage.endpoint_suffix must be a safe azure endpoint suffix")
 		}
 		hasKey := s.AccountKeyRef != ""
+		hasSAS := s.AccountSASRef != ""
 		hasSP := s.TenantIDRef != "" || s.ClientIDRef != "" || s.ClientSecretRef != ""
 		completeSP := s.TenantIDRef != "" && s.ClientIDRef != "" && s.ClientSecretRef != ""
+		modes := 0
+		if hasKey {
+			modes++
+		}
+		if hasSAS {
+			modes++
+		}
+		if hasSP {
+			modes++
+		}
 		switch {
-		case hasKey && hasSP:
-			return errors.New("storage azure account key and service principal cannot both be set")
+		case modes > 1:
+			return errors.New("storage azure credentials must be exactly one of account_key_ref, account_sas_ref, or tenant/client/secret refs")
 		case hasKey:
+		case hasSAS:
 		case completeSP:
 		case hasSP:
 			return errors.New("storage azure service principal refs are incomplete")
 		default:
-			return errors.New("storage azure requires account_key_ref or tenant/client/secret refs")
+			return errors.New("storage azure requires account_key_ref, account_sas_ref, or tenant/client/secret refs")
 		}
 	default:
 		return errors.New("storage.type must be s3, minio, sftp, or azure")
@@ -323,6 +336,7 @@ func validateStorage(s Storage) error {
 		{s.UsernameRef, "storage.username_ref"},
 		{s.PasswordRef, "storage.password_ref"},
 		{s.AccountKeyRef, "storage.account_key_ref"},
+		{s.AccountSASRef, "storage.account_sas_ref"},
 		{s.TenantIDRef, "storage.tenant_id_ref"},
 		{s.ClientIDRef, "storage.client_id_ref"},
 		{s.ClientSecretRef, "storage.client_secret_ref"},
@@ -336,7 +350,8 @@ func validateStorage(s Storage) error {
 
 func hasAzureStorageFields(s Storage) bool {
 	return s.Account != "" || s.Container != "" || s.EndpointSuffix != "" ||
-		s.AccountKeyRef != "" || s.TenantIDRef != "" || s.ClientIDRef != "" || s.ClientSecretRef != ""
+		s.AccountKeyRef != "" || s.AccountSASRef != "" ||
+		s.TenantIDRef != "" || s.ClientIDRef != "" || s.ClientSecretRef != ""
 }
 
 func validAzureAccount(value string) bool {

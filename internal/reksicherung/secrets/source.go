@@ -35,6 +35,7 @@ const (
 	FieldAzurePathPrefix    = "AZURE_PATH_PREFIX"
 	FieldAzureEndpointSuffix = "AZURE_ENDPOINT_SUFFIX"
 	FieldAzureAccountKey    = "AZURE_ACCOUNT_KEY"
+	FieldAzureAccountSAS    = "AZURE_ACCOUNT_SAS"
 	FieldAzureTenantID      = "AZURE_TENANT_ID"
 	FieldAzureClientID      = "AZURE_CLIENT_ID"
 	FieldAzureClientSecret  = "AZURE_CLIENT_SECRET"
@@ -71,6 +72,7 @@ type SourceMaterial struct {
 	AzurePathPrefix     string
 	AzureEndpointSuffix string
 	AzureAccountKey     []byte
+	AzureAccountSAS     []byte
 	AzureTenantID       []byte
 	AzureClientID       []byte
 	AzureClientSecret   []byte
@@ -87,6 +89,7 @@ func (m *SourceMaterial) Clear() {
 	clearBytes(m.AccessKeyID)
 	clearBytes(m.SecretAccessKey)
 	clearBytes(m.AzureAccountKey)
+	clearBytes(m.AzureAccountSAS)
 	clearBytes(m.AzureTenantID)
 	clearBytes(m.AzureClientID)
 	clearBytes(m.AzureClientSecret)
@@ -94,6 +97,7 @@ func (m *SourceMaterial) Clear() {
 	m.AccessKeyID = nil
 	m.SecretAccessKey = nil
 	m.AzureAccountKey = nil
+	m.AzureAccountSAS = nil
 	m.AzureTenantID = nil
 	m.AzureClientID = nil
 	m.AzureClientSecret = nil
@@ -173,6 +177,7 @@ func ResolveSource(ctx context.Context, provider SecretProvider, sourceID, backu
 		AzurePathPrefix:     strings.TrimSpace(merged[FieldAzurePathPrefix]),
 		AzureEndpointSuffix: strings.TrimSpace(merged[FieldAzureEndpointSuffix]),
 		AzureAccountKey:     []byte(merged[FieldAzureAccountKey]),
+		AzureAccountSAS:     []byte(merged[FieldAzureAccountSAS]),
 		AzureTenantID:       []byte(merged[FieldAzureTenantID]),
 		AzureClientID:       []byte(merged[FieldAzureClientID]),
 		AzureClientSecret:   []byte(merged[FieldAzureClientSecret]),
@@ -239,13 +244,26 @@ func validateAzureMaterial(material *SourceMaterial, backupProvider string) erro
 	}
 
 	hasKey := len(material.AzureAccountKey) > 0
+	hasSAS := len(material.AzureAccountSAS) > 0
 	hasSP := len(material.AzureTenantID) > 0 || len(material.AzureClientID) > 0 || len(material.AzureClientSecret) > 0
 	completeSP := len(material.AzureTenantID) > 0 && len(material.AzureClientID) > 0 && len(material.AzureClientSecret) > 0
+	modes := 0
+	if hasKey {
+		modes++
+	}
+	if hasSAS {
+		modes++
+	}
+	if hasSP {
+		modes++
+	}
 	switch {
-	case hasKey && hasSP:
-		return fmt.Errorf("%w: azure account key and service principal cannot both be set", ErrIncompleteSource)
+	case modes > 1:
+		return fmt.Errorf("%w: azure credentials must be exactly one of account key, SAS, or service principal", ErrIncompleteSource)
 	case hasKey:
 		// ok
+	case hasSAS:
+		// ok for Store and restic
 	case completeSP:
 		// ok for gobackup Store; restic checked below
 	case hasSP:
@@ -260,8 +278,8 @@ func validateAzureMaterial(material *SourceMaterial, backupProvider string) erro
 			return fmt.Errorf("%w: missing or invalid AZURE_PATH_PREFIX", ErrIncompleteSource)
 		}
 	case "restic":
-		if !hasKey {
-			return fmt.Errorf("%w: azure restic sources require AZURE_ACCOUNT_KEY", ErrIncompleteSource)
+		if !hasKey && !hasSAS {
+			return fmt.Errorf("%w: azure restic sources require AZURE_ACCOUNT_KEY or AZURE_ACCOUNT_SAS", ErrIncompleteSource)
 		}
 		if material.ResticRepository == "" || len(material.ResticPassword) == 0 {
 			return fmt.Errorf("%w: missing RESTIC_REPOSITORY or RESTIC_PASSWORD", ErrIncompleteSource)
@@ -281,8 +299,9 @@ func hasAnyS3Fields(material *SourceMaterial) bool {
 func hasAnyAzureFields(material *SourceMaterial) bool {
 	return material.AzureAccountName != "" || material.AzureContainer != "" ||
 		material.AzurePathPrefix != "" || material.AzureEndpointSuffix != "" ||
-		len(material.AzureAccountKey) > 0 || len(material.AzureTenantID) > 0 ||
-		len(material.AzureClientID) > 0 || len(material.AzureClientSecret) > 0
+		len(material.AzureAccountKey) > 0 || len(material.AzureAccountSAS) > 0 ||
+		len(material.AzureTenantID) > 0 || len(material.AzureClientID) > 0 ||
+		len(material.AzureClientSecret) > 0
 }
 
 func resolvePathMap(ctx context.Context, provider SecretProvider, path string) (map[string]string, error) {
@@ -291,7 +310,7 @@ func resolvePathMap(ctx context.Context, provider SecretProvider, path string) (
 		FieldS3AccessKeyID, FieldS3SecretAccessKey, FieldS3Endpoint, FieldS3Region,
 		FieldS3Bucket, FieldS3PathPrefix,
 		FieldAzureAccountName, FieldAzureContainer, FieldAzurePathPrefix, FieldAzureEndpointSuffix,
-		FieldAzureAccountKey, FieldAzureTenantID, FieldAzureClientID, FieldAzureClientSecret,
+		FieldAzureAccountKey, FieldAzureAccountSAS, FieldAzureTenantID, FieldAzureClientID, FieldAzureClientSecret,
 		FieldResticRepository, FieldResticPassword,
 	}
 	out := make(map[string]string, len(keys))

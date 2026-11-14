@@ -147,6 +147,7 @@ func openObjectStore(material secrets.SourceMaterial) (storage.Store, string, er
 			Container:      material.AzureContainer,
 			EndpointSuffix: material.AzureEndpointSuffix,
 			AccountKey:     string(material.AzureAccountKey),
+			AccountSAS:     string(material.AzureAccountSAS),
 			TenantID:       string(material.AzureTenantID),
 			ClientID:       string(material.AzureClientID),
 			ClientSecret:   string(material.AzureClientSecret),
