@@ -17,6 +17,11 @@ JSON Schema drafts and markdown contracts for every Reksicherung input.
 | `configgen-input.schema.json` | I-CONFIGGEN |
 | `openbao-source-kv.md` | human/AI convention notes |
 
-Fixtures: `fixtures/valid/` and `fixtures/invalid/`.
+Fixtures: `fixtures/valid/` and `fixtures/invalid/` (including `configgen.*.yaml`).
 
-See also [`../inputs.md`](../inputs.md). Optional Airon binding: [`../../examples/airon/`](../../examples/airon/).
+Operator-oriented configgen templates (same contract): [`../../examples/configgen/`](../../examples/configgen/).
+
+See also [`../inputs.md`](../inputs.md), [`../getting-started.md`](../getting-started.md),
+[`../glossary.md`](../glossary.md). Optional Airon binding:
+[`../../examples/airon/`](../../examples/airon/) (read its README before using
+`restore-check.yaml`).

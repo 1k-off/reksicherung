@@ -15,8 +15,9 @@ Create a **self-contained operator package** and bring it to first successful
 `airon run` restore-check. Prefer **documented CLI commands in RUNBOOK.md**;
 optional thin scripts are fine. Do **not** require image builds — use GHCR.
 
-Related skills: `reksicherung-bootstrap` (source build), `reksicherung-add-source`,
-`reksicherung-restore-check`, `reksicherung-operate`.
+Related: human GHCR path without Airon — `docs/getting-started.md` +
+`docs/mcp-clients.md`. Skills: `reksicherung-bootstrap` (source build),
+`reksicherung-add-source`, `reksicherung-restore-check`, `reksicherung-operate`.
 
 ## Inputs (ask if missing)
 

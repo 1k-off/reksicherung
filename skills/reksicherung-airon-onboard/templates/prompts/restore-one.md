@@ -3,7 +3,7 @@
 ## Restic
 
 ```
-source_id=acme-prod-appdb-daily
+source_id=demo-app-a-daily
 provider=restic
 database.name=AppDb
 backupPath=/data/restic/AppDb-daily.bacpac
@@ -13,7 +13,7 @@ cleanup=hold_for_review
 ## GoBackup
 
 ```
-source_id=contoso-web-sql-default
+source_id=demo-app-b-default
 provider=gobackup
 database.name=WebSql
 cleanup=hold_for_review

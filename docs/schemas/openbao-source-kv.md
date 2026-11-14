@@ -24,14 +24,14 @@ Project boundary: **one OpenBao** (or dedicated mount/namespace) per restore-che
 ```bash
 bao kv put secret/reksicherung/defaults \
   STORAGE_TYPE=s3 \
-  S3_ENDPOINT=https://fsn1.your-objectstorage.com \
-  S3_REGION=fsn1 \
-  S3_BUCKET=onsite-backups-general
+  S3_ENDPOINT=https://objects.example.test \
+  S3_REGION=eu-central-1 \
+  S3_BUCKET=demo-backups
 
-bao kv put secret/reksicherung/sources/shop-production \
+bao kv put secret/reksicherung/sources/demo-app-a \
   S3_ACCESS_KEY_ID=... \
   S3_SECRET_ACCESS_KEY=... \
-  S3_PATH_PREFIX=shop/production/
+  S3_PATH_PREFIX=demo-a/prod/
 ```
 
 ## Azure auth (exactly one mode)
@@ -45,10 +45,10 @@ bao kv put secret/reksicherung/sources/shop-production \
 ```bash
 bao kv put secret/reksicherung/defaults \
   STORAGE_TYPE=azure \
-  AZURE_ACCOUNT_NAME=mystorageacct
+  AZURE_ACCOUNT_NAME=demostorage0001
 
-bao kv put secret/reksicherung/sources/shop-production \
-  AZURE_CONTAINER=shop \
+bao kv put secret/reksicherung/sources/demo-app-a \
+  AZURE_CONTAINER=demoa \
   AZURE_ACCOUNT_SAS='sv=...&sig=...' \
   AZURE_PATH_PREFIX=production/
 ```
@@ -70,4 +70,4 @@ bao kv put secret/reksicherung/sqlserver \
 SQL Server fields (`HOST`, `USERNAME`, `PASSWORD`; `PORT` optional, default `1433`) are shared by restore, inspect, and cleanup MCPs via `secrets.ResolveSQLServer`.
 
 Runtime refs for sources are assembled automatically, e.g.
-`openbao://secret/reksicherung/sources/shop-production#S3_ACCESS_KEY_ID`.
+`openbao://secret/reksicherung/sources/demo-app-a#S3_ACCESS_KEY_ID`.

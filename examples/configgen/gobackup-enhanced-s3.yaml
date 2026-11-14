@@ -1,0 +1,36 @@
+# I-CONFIGGEN → reksicherung configgen -provider gobackup
+# Enhanced mode: separate daily / weekly / monthly models.
+project:
+  name: demo-app-b
+mode: enhanced
+storage:
+  type: minio
+  bucket: demo-backups
+  region: eu-central-1
+  endpoint: https://objects.example.test
+  path_prefix: demo-b/prod
+  access_key_id_ref: openbao://secret/reksicherung/sources/demo-app-b#S3_ACCESS_KEY_ID
+  secret_access_key_ref: openbao://secret/reksicherung/sources/demo-app-b#S3_SECRET_ACCESS_KEY
+schedules:
+  daily:
+    cron: "0 1 * * *"
+    keep: 7
+    healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-app-b-daily
+    path_suffix: daily
+  weekly:
+    cron: "0 2 * * 0"
+    keep: 4
+    healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-app-b-weekly
+    path_suffix: weekly
+  monthly:
+    cron: "0 3 1 * *"
+    keep: 12
+    healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-app-b-monthly
+    path_suffix: monthly
+databases:
+  - name: main
+    type: mssql
+    host: sql.demo-b.example.test
+    database: AppB
+    username_ref: openbao://secret/reksicherung/backup-db/demo-b#username
+    password_ref: openbao://secret/reksicherung/backup-db/demo-b#password

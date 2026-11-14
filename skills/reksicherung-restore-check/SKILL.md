@@ -4,6 +4,9 @@ Run a backup restoreability check through Reksicherung MCP tools. Do not create,
 start, or stop containers. Operate only on the operator-provisioned SQL Server
 and MCP services. Any orchestrator (or a human operator) may drive this skill.
 
+Attach MCP first: [`docs/mcp-clients.md`](../../docs/mcp-clients.md) (or Airon).
+Onboarding: [`docs/getting-started.md`](../../docs/getting-started.md).
+
 Inputs: `docs/inputs.md` (`I-INVENTORY`, `I-PROMPT`). Schemas under `docs/schemas/`.
 
 ## Inputs

@@ -34,7 +34,7 @@ daily_batch=2
 oldest_window=10"
 ```
 
-Optional: `source_id=acme-prod-appdb-daily` to force one fictional id (still load
+Optional: `source_id=demo-app-a-daily` to force one fictional id (still load
 provider/path from catalog — never invent).
 
 Expect final `### restore_map` and files under `coverage/runs/`. Airon tool log:

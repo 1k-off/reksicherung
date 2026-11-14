@@ -45,7 +45,7 @@ Stack is download/restore-check only. Mutations only against `reksicherung_*` DB
 ```
 
 Secrets: OpenBao KV, not catalog. Example ids in prompts are fictional
-(`acme-…`, `contoso-…`).
+(`demo-app-a-…`, `demo-app-b-…`).
 
 ## Prerequisites
 

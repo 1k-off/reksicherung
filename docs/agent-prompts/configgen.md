@@ -2,13 +2,16 @@
 
 Follow `skills/reksicherung-configgen/SKILL.md` and `docs/inputs.md` (`I-CONFIGGEN`).
 
+Start from the closest file under `examples/configgen/` (see that README table);
+replace fictional OpenBao refs and hostnames. Do not invent plaintext secrets.
+
 Slots:
 
 - `provider`: `gobackup` or `resticprofile`
 - `input_path`: path to write/read I-CONFIGGEN YAML
 - `output_path`: generated provider YAML
 - `bindings_path`: optional bindings JSON
-- `storage`: `s3` \| `minio` \| `azure` (and auth mode for azure)
+- `storage`: `s3` \| `minio` \| `azure` \| `sftp` (sftp = gobackup only; azure auth mode per provider)
 
 Use:
 

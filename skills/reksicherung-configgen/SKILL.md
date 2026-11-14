@@ -11,10 +11,14 @@ description: >-
 Produce provider YAML from the shared backup-as-code contract. Does **not**
 install agents on servers, resolve OpenBao secrets, or start containers.
 
+**Skip this skill** when backups already exist — go straight to
+`reksicherung-add-source` / `docs/getting-started.md`.
+
 ## Inputs
 
 - `I-CONFIGGEN` — `docs/schemas/configgen-input.schema.json`
-- Fixture example: `docs/schemas/fixtures/valid/configgen.simple-archive.yaml`
+- **Operator examples:** [`examples/configgen/`](../../examples/configgen/) (MSSQL S3/Azure, SFTP, enhanced, resticprofile + Azure SAS)
+- Schema fixtures: `docs/schemas/fixtures/valid/configgen.*.yaml`
 - Package docs: `internal/reksicherung/configgen/{input,gobackup,resticprofile}/README.md`
 
 ## Choose provider
@@ -35,10 +39,17 @@ S3/MinIO work for both. SFTP: gobackup only (resticprofile rejects).
 2. Validate + render:
 
 ```bash
+# Start from a template under examples/configgen/
 reksicherung configgen \
-  -provider gobackup|resticprofile \
-  -in path/to/input.yaml \
-  -out path/to/gobackup.yml|restic.yml \
+  -provider gobackup \
+  -in examples/configgen/gobackup-mssql-s3.yaml \
+  -out path/to/gobackup.yml \
+  -bindings path/to/bindings.json
+
+reksicherung configgen \
+  -provider resticprofile \
+  -in examples/configgen/resticprofile-sqlbak-s3.yaml \
+  -out path/to/restic.yml \
   -bindings path/to/bindings.json
 ```
 

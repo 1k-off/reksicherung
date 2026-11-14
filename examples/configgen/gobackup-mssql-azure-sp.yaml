@@ -1,0 +1,25 @@
+# I-CONFIGGEN → reksicherung configgen -provider gobackup
+# Azure Blob via service principal (gobackup does not accept account key/SAS here).
+project:
+  name: demo-app-a
+  service: app-a
+storage:
+  type: azure
+  account: demostorage0001
+  container: demoa
+  path_prefix: production
+  tenant_id_ref: openbao://secret/reksicherung/azure#tenant_id
+  client_id_ref: openbao://secret/reksicherung/azure#client_id
+  client_secret_ref: openbao://secret/reksicherung/azure#client_secret
+schedules:
+  cron: "30 4 * * *"
+  keep: 14
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-app-a
+databases:
+  - name: main
+    type: mssql
+    host: sql.demo-a.example.test
+    port: 1433
+    database: AppA
+    username_ref: openbao://secret/reksicherung/backup-db/demo-a#username
+    password_ref: openbao://secret/reksicherung/backup-db/demo-a#password

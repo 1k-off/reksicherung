@@ -1,0 +1,24 @@
+# I-CONFIGGEN → reksicherung configgen -provider gobackup
+# File archive to SFTP (resticprofile rejects sftp — use gobackup only).
+project:
+  name: files-edge
+storage:
+  type: sftp
+  host: backup.example.test
+  port: 22
+  path_prefix: files-edge
+  username_ref: openbao://secret/reksicherung/sftp#username
+  password_ref: openbao://secret/reksicherung/sftp#password
+schedules:
+  cron: "0 3 * * *"
+  keep: 7
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#files-edge
+archive:
+  includes:
+    - /var/lib/app
+  excludes:
+    - /var/lib/app/tmp
+  compress_type: tgz
+encryption:
+  enabled: true
+  password_ref: openbao://secret/reksicherung/encryption#files-edge

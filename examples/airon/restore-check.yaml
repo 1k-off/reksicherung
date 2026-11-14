@@ -1,4 +1,8 @@
 # Optional Airon binding of I-ORCHESTRATOR-JOB (not required by Reksicherung).
+# DEVELOPER STUB: host-built MCP binaries + env_passthrough false.
+# For GHCR / Windows / Podman labs use skill reksicherung-airon-onboard templates
+# (airon-mcp-stdio.yaml: RUNTIME run --rm -i, env_passthrough true).
+# See examples/airon/README.md.
 # SQL host/user/password come from OpenBao secret/reksicherung/sqlserver
 # (HOST, PORT?, USERNAME, PASSWORD). Inspect only needs the per-run database name.
 

@@ -1,0 +1,23 @@
+# I-CONFIGGEN → reksicherung configgen -provider resticprofile
+# Azure Blob with container SAS (prefer over N app registrations).
+# For account key auth, replace account_sas_ref with account_key_ref (exactly one).
+project:
+  name: demo-files
+storage:
+  type: azure
+  account: demostorage0001
+  container: demoa
+  path_prefix: production
+  account_sas_ref: openbao://secret/reksicherung/sources/demo-files#AZURE_ACCOUNT_SAS
+schedules:
+  cron: "15 5 * * *"
+  keep: 14
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-files
+archive:
+  includes:
+    - /var/lib/demo-app/data
+  excludes:
+    - /var/lib/demo-app/data/tmp
+encryption:
+  enabled: true
+  password_ref: openbao://secret/reksicherung/sources/demo-files#RESTIC_PASSWORD

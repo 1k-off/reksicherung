@@ -6,7 +6,7 @@
     "oldest_window": 10
   },
   "sources": {
-    "acme-prod-appdb-daily": {
+    "demo-app-a-daily": {
       "last_checked_at": null,
       "last_status": null,
       "last_run_id": null,
@@ -16,7 +16,7 @@
       "last_report": null,
       "checks_total": 0
     },
-    "contoso-web-sql-default": {
+    "demo-app-b-default": {
       "last_checked_at": null,
       "last_status": null,
       "last_run_id": null,

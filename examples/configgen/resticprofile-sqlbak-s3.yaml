@@ -1,0 +1,25 @@
+# I-CONFIGGEN → reksicherung configgen -provider resticprofile
+# Native SQL Server .bak file path inside each restic snapshot.
+# Catalog backupPath must match archive.includes[0] exactly.
+project:
+  name: demo-app-b
+  service: app-b
+mode: simple
+storage:
+  type: s3
+  bucket: demo-backups
+  region: eu-central-1
+  endpoint: https://objects.example.test
+  path_prefix: demo-b/prod
+  access_key_id_ref: openbao://secret/reksicherung/sources/demo-app-b#S3_ACCESS_KEY_ID
+  secret_access_key_ref: openbao://secret/reksicherung/sources/demo-app-b#S3_SECRET_ACCESS_KEY
+schedules:
+  cron: "0 2 * * *"
+  keep: 14
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-app-b
+archive:
+  includes:
+    - /var/opt/mssql/backup/demo-app-b.bak
+encryption:
+  enabled: true
+  password_ref: openbao://secret/reksicherung/sources/demo-app-b#RESTIC_PASSWORD

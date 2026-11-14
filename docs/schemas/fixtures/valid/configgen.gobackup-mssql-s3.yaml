@@ -1,0 +1,29 @@
+# I-CONFIGGEN → reksicherung configgen -provider gobackup
+# SQL Server bacpac via GoBackup mssql plugin → S3-compatible storage.
+project:
+  name: demo-app-a
+  service: app-a
+mode: simple
+storage:
+  type: s3
+  bucket: demo-backups
+  region: eu-central-1
+  endpoint: https://objects.example.test
+  path_prefix: demo-a/prod
+  access_key_id_ref: openbao://secret/reksicherung/sources/demo-app-a#S3_ACCESS_KEY_ID
+  secret_access_key_ref: openbao://secret/reksicherung/sources/demo-app-a#S3_SECRET_ACCESS_KEY
+schedules:
+  cron: "0 5 * * *"
+  keep: 14
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-app-a
+databases:
+  - name: main
+    type: mssql
+    host: sql.demo-a.example.test
+    port: 1433
+    database: AppA
+    username_ref: openbao://secret/reksicherung/backup-db/demo-a#username
+    password_ref: openbao://secret/reksicherung/backup-db/demo-a#password
+    # Lab-only; leave unset/false when the SQL cert is trusted.
+    trust_server_certificate: true
+    ignore_schema_check: true

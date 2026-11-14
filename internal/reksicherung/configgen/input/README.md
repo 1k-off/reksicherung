@@ -10,7 +10,7 @@ inputs must be `*_ref` values accepted by
 references or return secret values.
 
 Machine-readable schema: `docs/schemas/configgen-input.schema.json`
-(registry id `I-CONFIGGEN`).
+(registry id `I-CONFIGGEN`). Operator templates: `examples/configgen/`.
 
 Each provider may reject fields it cannot map (`ValidateForProvider`). Storage
 `type` is an extensible discriminator (`s3`, `minio`, `sftp`, `azure`); new

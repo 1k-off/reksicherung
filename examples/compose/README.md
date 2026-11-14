@@ -1,15 +1,19 @@
 # Production compose reference
 
-See [`docs/inputs.md`](../../docs/inputs.md) for the full AI input registry.
+**Operators:** use the copy-paste runbook
+[`RUNBOOK.md`](RUNBOOK.md) (OpenBao init/unseal, SQL seed, volume chmod).
+
+Human onboarding: [`docs/getting-started.md`](../../docs/getting-started.md).  
+Full AI input registry: [`docs/inputs.md`](../../docs/inputs.md).
 
 ## What this stack provides
 
 | Service | Purpose |
 | --- | --- |
 | `openbao` | Persistent file-storage OpenBao (not `-dev`) |
-| `sqlserver` | Isolated restore target |
+| `sqlserver` | Isolated restore target (host `127.0.0.1:11433` → `1433`) |
 | `cleanup-reconciler` | Durable drop of expired automatic run-scoped databases |
-| `*-mcp` (profile `mcp-stdio`) | Optional containers when an orchestrator launches MCP via `docker run -i` |
+| `*-mcp` (profile `mcp-stdio`) | Optional long-lived containers; preferred pattern is `docker run -i` — see [`docs/mcp-clients.md`](../../docs/mcp-clients.md) |
 
 Per-backup S3/Restic credentials are stored in OpenBao
 (`secret/reksicherung/sources/<source_id>`), not in `.env`.
@@ -21,24 +25,21 @@ SQL connection (`HOST`/`USERNAME`/`PASSWORD`, optional `PORT`) is
 ```bash
 cp .env.example .env
 # edit bootstrap secrets only (compose-env.schema.json)
-
-docker compose build
-docker compose up -d openbao sqlserver
-
-# Init/unseal OpenBao; enable KV v2; write defaults + sqlserver + per-source KV
-# (docs/schemas/openbao-source-kv.md). Put least-privilege token into .env.
-
-docker compose up -d cleanup-reconciler
+# then follow RUNBOOK.md for init/unseal/seed/chmod
 ```
 
-Preferred production pattern: an MCP host runs MCP binaries as stdio children
-with OpenBao bootstrap env only; tools receive `source_id` per call. Manual
-operation and other orchestrators are supported. Optional Airon example:
-`../airon/`.
+Preferred production pattern: an MCP host runs MCP binaries/images as stdio
+children with OpenBao bootstrap env only; tools receive `source_id` per call.
+
+- Any MCP host + GHCR: [`docs/mcp-clients.md`](../../docs/mcp-clients.md)
+- Optional Airon lab pack: skill `reksicherung-airon-onboard`
+- Host-binary Airon stub only: [`../airon/README.md`](../airon/README.md)
 
 ## Safety
 
 - Do not publish SQL Server ports on the host in production.
-- Pin image digests before promotion.
+- Pin image digests before promotion (`latest` is lab-only).
 - Replace OpenBao HTTP with TLS before non-loopback use.
 - `hold_for_review` databases are never auto-dropped.
+- Set `REKSICHERUNG_ARTIFACT_STAGE_DIR` to the literal
+  `/var/lib/reksicherung/artifacts` (never a Windows host path).

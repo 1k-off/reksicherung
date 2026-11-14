@@ -22,8 +22,11 @@ Add one database/backup source without editing compose `.env` storage keys.
 
 ## Prerequisites / related
 
-- Provider configs: `reksicherung-configgen` (`I-CONFIGGEN` → gobackup/resticprofile)
-- After register: `reksicherung-restore-check`, then `reksicherung-schedule-verify`
+- Stack: `examples/compose/RUNBOOK.md` or `docs/getting-started.md`
+- Optional provider configs: `reksicherung-configgen` only if you need new
+  GoBackup/resticprofile YAML (`I-CONFIGGEN`)
+- After register: `docs/mcp-clients.md` + `reksicherung-restore-check`, then
+  `reksicherung-schedule-verify`
 - Journey map: `reksicherung-index`
 
 ## Fail closed

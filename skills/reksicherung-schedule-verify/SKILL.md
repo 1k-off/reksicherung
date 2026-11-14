@@ -13,9 +13,11 @@ Do not start/stop containers from this skill.
 
 ## Prerequisites
 
-- Bootstrap complete (`reksicherung-bootstrap` or airon-onboard pack).
+- Stack up via `docs/getting-started.md` (compose RUNBOOK), `reksicherung-bootstrap`,
+  or `reksicherung-airon-onboard`.
 - At least one source with a prior dry-run via `reksicherung-restore-check`.
-- MCP tools reachable from the job runner.
+- MCP tools reachable from the job runner (`docs/mcp-clients.md` if no Airon).
+- Configgen is **not** required if backups already exist in object storage.
 
 ## Inputs
 
