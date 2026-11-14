@@ -10,11 +10,11 @@ AI skill map: [`skills/reksicherung-index/SKILL.md`](../skills/reksicherung-inde
 
 | Path | Use when | Start here |
 | --- | --- | --- |
-| **A. Lab / GHCR + any MCP host** | You want images from GHCR and Cursor/Claude/other stdio (no Airon) | This page → compose [RUNBOOK](../examples/compose/RUNBOOK.md) → [mcp-clients](mcp-clients.md) |
+| **A. Lab / GHCR + any MCP host** | Pull published images; Cursor/Claude/other stdio (no Airon) | This page → skill [`reksicherung-bootstrap`](../skills/reksicherung-bootstrap/SKILL.md) → [RUNBOOK](../examples/compose/RUNBOOK.md) → [mcp-clients](mcp-clients.md) |
 | **B. Airon pack** | Client/lab already uses Airon + LLM | Skill [`reksicherung-airon-onboard`](../skills/reksicherung-airon-onboard/SKILL.md) |
-| **C. Build from source** | You develop or must build images yourself | Skill [`reksicherung-bootstrap`](../skills/reksicherung-bootstrap/SKILL.md) + compose RUNBOOK |
+| **Developers only** | Changing this repo’s images/code | Bootstrap skill section “Developers only — build from source” |
 
-Path A is the default recommendation for a new operator.
+Paths A and B both use **GHCR** (`latest` or a pinned tag). Do not `compose build` for operator bring-up.
 
 ## Ask once (decision checklist)
 
@@ -61,19 +61,9 @@ Reksicherung never creates or removes those containers from restore-check skills
 
 ### 1. Bring up OpenBao + SQL
 
-Follow **all** steps in [`examples/compose/RUNBOOK.md`](../examples/compose/RUNBOOK.md)
-through seed SQL + `chmod 1777` on `reksicherung_sql-backup`.
-
-Pull MCP/CLI images (lab tag `latest`; pin digests before production):
-
-```bash
-for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect cli; do
-  docker pull "ghcr.io/1k-off/reksicherung/${i}:latest"
-done
-```
-
-Build or retag `reksicherung/cli:local` for `cleanup-reconciler` as described in
-the RUNBOOK (compose references a local CLI image name).
+Follow skill [`reksicherung-bootstrap`](../skills/reksicherung-bootstrap/SKILL.md)
+and **all** steps in [`examples/compose/RUNBOOK.md`](../examples/compose/RUNBOOK.md)
+(pull GHCR → OpenBao → SQL → reconciler → seed → `chmod 1777`). Do not build images.
 
 ### 2. Register one source
 

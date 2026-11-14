@@ -12,8 +12,8 @@ Scaffold a GHCR-based lab package (compose + catalog + Airon job) and document
 first-run commands for the operator’s OS and container runtime (`docker` /
 `podman` / `nerdctl`). Prefer RUNBOOK CLI over heavy installers.
 
-Do **not** use `reksicherung-bootstrap` unless the operator wants to build
-images from source.
+Use the same GHCR images as `reksicherung-bootstrap`. Do **not** build images
+unless the operator explicitly asked for developer/source builds.
 
 ## Must apply (lessons from lab)
 

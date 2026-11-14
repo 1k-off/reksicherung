@@ -81,14 +81,16 @@ docker compose --env-file .env exec -T \
 
 If `path already in use`, skip — mount already exists.
 
-## 5. Start SQL Server + reconciler
+## 5. Pull Reksicherung images + start SQL / reconciler
 
-Images: OpenBao and SQL Server are public. CLI/reconciler image is built from
-this repo (or retag a GHCR `cli` image as `reksicherung/cli:local`).
+Operators **pull** published images. Do **not** `compose build` unless you are
+developing this repository (see bootstrap skill “Developers only”).
 
 ```bash
-# From repo root — build CLI used by cleanup-reconciler (and optional MCP profiles)
-docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env build cleanup-reconciler
+TAG="${REKSICHERUNG_IMAGE_TAG:-latest}"   # optional; also set in .env
+for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect cli; do
+  docker pull "ghcr.io/1k-off/reksicherung/${i}:${TAG}"
+done
 
 docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env \
   up -d openbao sqlserver cleanup-reconciler
@@ -97,6 +99,10 @@ docker compose -f examples/compose/docker-compose.yml --env-file examples/compos
 docker run --rm -v reksicherung_sql-backup:/var/opt/mssql/backup alpine \
   chmod 1777 /var/opt/mssql/backup
 ```
+
+`cleanup-reconciler` uses `ghcr.io/1k-off/reksicherung/cli:$TAG`. MCP hosts
+normally run GHCR images via `docker run -i` ([`docs/mcp-clients.md`](../../docs/mcp-clients.md));
+compose profile `mcp-stdio` is optional.
 
 Host SQL port in this compose file: `127.0.0.1:11433` → container `1433`.
 Inside the compose network always use `HOST=sqlserver` and port `1433`.

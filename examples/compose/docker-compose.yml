@@ -1,7 +1,8 @@
-# Production-oriented operator stack. Build images from the repository root:
-#   docker compose -f examples/compose/docker-compose.yml build
-# Initialize OpenBao, load KV secrets (defaults + per-source + sqlserver),
-# create the SQL restore login, then start.
+# Operator stack: pull published images (default). Do not build unless developing.
+#   See examples/compose/RUNBOOK.md and skills/reksicherung-bootstrap/SKILL.md
+# Optional tag: REKSICHERUNG_IMAGE_TAG in .env (default latest).
+# Developers only:
+#   REKSICHERUNG_IMAGE_TAG=local docker compose -f examples/compose/docker-compose.yml build
 #
 # Per-backup S3/Restic credentials are NOT compose env vars — see
 # docs/schemas/openbao-source-kv.md and docs/inputs.md.
@@ -54,10 +55,11 @@ services:
           memory: 4G
 
   gobackup-mcp:
+    image: ghcr.io/1k-off/reksicherung/mcp-gobackup:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.gobackup
-    image: reksicherung/mcp-gobackup:local
+    pull_policy: missing
     environment:
       REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
       REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
@@ -72,10 +74,11 @@ services:
     profiles: ["mcp-stdio"]
 
   restic-mcp:
+    image: ghcr.io/1k-off/reksicherung/mcp-restic:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.restic
-    image: reksicherung/mcp-restic:local
+    pull_policy: missing
     environment:
       REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
       REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
@@ -90,10 +93,11 @@ services:
     profiles: ["mcp-stdio"]
 
   sqlserver-restore-mcp:
+    image: ghcr.io/1k-off/reksicherung/mcp-sqlserver-restore:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.sqlserver-restore
-    image: reksicherung/mcp-sqlserver-restore:local
+    pull_policy: missing
     environment:
       REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
       REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
@@ -112,10 +116,11 @@ services:
     depends_on: [sqlserver, openbao]
 
   sqlserver-inspect-mcp:
+    image: ghcr.io/1k-off/reksicherung/mcp-sqlserver-inspect:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.sqlserver-inspect
-    image: reksicherung/mcp-sqlserver-inspect:local
+    pull_policy: missing
     environment:
       REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
       REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
@@ -129,10 +134,11 @@ services:
     depends_on: [sqlserver, openbao]
 
   cleanup-reconciler:
+    image: ghcr.io/1k-off/reksicherung/cli:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: deploy/docker/Dockerfile.cli
-    image: reksicherung/cli:local
+    pull_policy: missing
     command: ["reconcile", "-registry", "/var/lib/reksicherung/runs/runs.db", "-interval", "30s"]
     environment:
       # In-network OpenBao (not host .env 127.0.0.1). PLAINTEXT=1 is lab-only.

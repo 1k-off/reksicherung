@@ -1,7 +1,8 @@
 # Production compose reference
 
-**Operators:** use the copy-paste runbook
+**Operators:** pull GHCR images and follow
 [`RUNBOOK.md`](RUNBOOK.md) (OpenBao init/unseal, SQL seed, volume chmod).
+Skill: [`reksicherung-bootstrap`](../../skills/reksicherung-bootstrap/SKILL.md).
 
 Human onboarding: [`docs/getting-started.md`](../../docs/getting-started.md).  
 Full AI input registry: [`docs/inputs.md`](../../docs/inputs.md).
@@ -12,8 +13,11 @@ Full AI input registry: [`docs/inputs.md`](../../docs/inputs.md).
 | --- | --- |
 | `openbao` | Persistent file-storage OpenBao (not `-dev`) |
 | `sqlserver` | Isolated restore target (host `127.0.0.1:11433` → `1433`) |
-| `cleanup-reconciler` | Durable drop of expired automatic run-scoped databases |
+| `cleanup-reconciler` | Durable drop of expired automatic run-scoped databases (`cli` image) |
 | `*-mcp` (profile `mcp-stdio`) | Optional long-lived containers; preferred pattern is `docker run -i` — see [`docs/mcp-clients.md`](../../docs/mcp-clients.md) |
+
+Images default to `ghcr.io/1k-off/reksicherung/*:${REKSICHERUNG_IMAGE_TAG:-latest}`.
+`build:` blocks exist for **developers only** (`compose build`).
 
 Per-backup S3/Restic credentials are stored in OpenBao
 (`secret/reksicherung/sources/<source_id>`), not in `.env`.
@@ -25,11 +29,11 @@ SQL connection (`HOST`/`USERNAME`/`PASSWORD`, optional `PORT`) is
 ```bash
 cp .env.example .env
 # edit bootstrap secrets only (compose-env.schema.json)
-# then follow RUNBOOK.md for init/unseal/seed/chmod
+# pull GHCR — do not build — then follow RUNBOOK.md
 ```
 
-Preferred production pattern: an MCP host runs MCP binaries/images as stdio
-children with OpenBao bootstrap env only; tools receive `source_id` per call.
+Preferred production pattern: an MCP host runs MCP images as stdio children
+with OpenBao bootstrap env only; tools receive `source_id` per call.
 
 - Any MCP host + GHCR: [`docs/mcp-clients.md`](../../docs/mcp-clients.md)
 - Optional Airon lab pack: skill `reksicherung-airon-onboard`

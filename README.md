@@ -14,8 +14,8 @@ Module path: `github.com/1k-off/reksicherung`. Catalog API: `reksicherung.1node.
 | Terms (`source_id`, catalog, verdicts, …) | [`docs/glossary.md`](docs/glossary.md) |
 | Copy-paste OpenBao + SQL compose steps | [`examples/compose/RUNBOOK.md`](examples/compose/RUNBOOK.md) |
 | Cursor / Claude / any MCP host + GHCR | [`docs/mcp-clients.md`](docs/mcp-clients.md) |
-| Airon lab pack (GHCR, no image build) | [`skills/reksicherung-airon-onboard/SKILL.md`](skills/reksicherung-airon-onboard/SKILL.md) |
-| Build images from source | [`skills/reksicherung-bootstrap/SKILL.md`](skills/reksicherung-bootstrap/SKILL.md) |
+| Stack bootstrap (GHCR pull) | [`skills/reksicherung-bootstrap/SKILL.md`](skills/reksicherung-bootstrap/SKILL.md) |
+| Airon lab pack (GHCR) | [`skills/reksicherung-airon-onboard/SKILL.md`](skills/reksicherung-airon-onboard/SKILL.md) |
 | AI agent skill map | [`skills/reksicherung-index/SKILL.md`](skills/reksicherung-index/SKILL.md) |
 
 **AI-first contracts:** all expected inputs are in [`docs/inputs.md`](docs/inputs.md) with schemas under [`docs/schemas/`](docs/schemas/).
@@ -50,7 +50,6 @@ GHCR images (lab tag `latest`; pin digests for production):
 
 ## Design
 
-- [`SPEC.md`](SPEC.md) — product boundaries
 - [`docs/decisions/`](docs/decisions/) — ADRs
 - [`docs/inputs.md`](docs/inputs.md) — input registry for AI agents
 
@@ -61,6 +60,12 @@ GHCR images (lab tag `latest`; pin digests for production):
 ```bash
 go test ./...
 go vet ./...
+```
+
+Build images only when iterating on this repo (operators must pull GHCR instead):
+
+```bash
+REKSICHERUNG_IMAGE_TAG=local docker compose -f examples/compose/docker-compose.yml build
 ```
 
 E2E (operator fixtures): `go test -tags=e2e ./test/e2e/...` — see [`test/e2e/README.md`](test/e2e/README.md).

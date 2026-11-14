@@ -14,6 +14,11 @@
     "MSSQL_SA_PASSWORD": { "type": "string", "minLength": 8 },
     "REKSICHERUNG_OPENBAO_ADDR": { "type": "string" },
     "REKSICHERUNG_OPENBAO_TOKEN": { "type": "string", "minLength": 1 },
+    "REKSICHERUNG_IMAGE_TAG": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Tag for ghcr.io/1k-off/reksicherung/* images (default latest). Operators pull; build is developers-only."
+    },
     "REKSICHERUNG_OPENBAO_PLAINTEXT": {
       "type": "string",
       "enum": ["1"],

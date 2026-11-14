@@ -21,15 +21,15 @@ Contracts: `docs/inputs.md` · schemas: `docs/schemas/`.
 
 | Step | Skill / doc | Outcome | Required? |
 | --- | --- | --- | --- |
-| 0. Path | `docs/getting-started.md` | Choose GHCR+MCP / Airon / source build | Yes |
-| 1. Stack | `reksicherung-bootstrap` **or** compose `RUNBOOK` **or** `reksicherung-airon-onboard` | OpenBao, SQL, MCP images | Yes |
+| 0. Path | `docs/getting-started.md` | Choose GHCR+MCP / Airon (build = devs only) | Yes |
+| 1. Stack | `reksicherung-bootstrap` **or** compose `RUNBOOK` **or** `reksicherung-airon-onboard` | OpenBao, SQL, **pulled** GHCR images | Yes |
 | 2. Backup configs | `reksicherung-configgen` + `examples/configgen/` | GoBackup / resticprofile YAML + bindings | **Only if** you need new backup YAML |
 | 3. Register source | `reksicherung-add-source` | Catalog row + OpenBao `sources/<id>` (`STORAGE_TYPE` required) | Yes |
 | 4. Dry-run check | `reksicherung-restore-check` (+ `docs/mcp-clients.md` if no Airon) | One `source_id` → PASS/FAIL/INCONCLUSIVE | Yes |
 | 5. Recurring verify | `reksicherung-schedule-verify` | Inventory + schedule + coverage policy | After dry-run |
 | 6. Day-2 | `reksicherung-operate` | Hold cleanup, reconciler, triage | Ongoing |
 
-Lab pack with GHCR (no image build): `reksicherung-airon-onboard`.
+Both bootstrap and airon-onboard use GHCR (no image build for operators).
 
 ## Component → skill
 

@@ -5,8 +5,8 @@
 1. Complete a lab dry-run via `docs/getting-started.md` (or Airon onboard), then
    harden with `docs/inputs.md` and `skills/reksicherung-bootstrap/SKILL.md`.
    Compose commands: `examples/compose/RUNBOOK.md`.
-2. Build and promote MCP/CLI images from `deploy/docker/` (or pin GHCR digests)
-   with pinned base digests.
+2. Pull or promote MCP/CLI images from GHCR with pinned digests. Build from
+   `deploy/docker/` only when developing this repository.
 3. Deploy OpenBao with persistent storage, unseal strategy, sealed backups, and a
    least-privilege token (or AppRole) for Reksicherung only. Write
    `secret/reksicherung/defaults`, per-source KV, and

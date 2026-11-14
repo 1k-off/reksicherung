@@ -6,7 +6,7 @@ description: >-
   compose) on Windows, Linux, and macOS. Use when onboarding a client/lab for Airon
   restore-checks, generating RUNBOOK/compose/job files, or replacing fragile
   compose-run MCP with `$RUNTIME run`. Distinct from reksicherung-bootstrap
-  (build-from-source).
+  (compose stack + any MCP host, same GHCR images, no Airon packaging).
 ---
 
 # Reksicherung + Airon onboard
@@ -15,9 +15,9 @@ Create a **self-contained operator package** and bring it to first successful
 `airon run` restore-check. Prefer **documented CLI commands in RUNBOOK.md**;
 optional thin scripts are fine. Do **not** require image builds — use GHCR.
 
-Related: human GHCR path without Airon — `docs/getting-started.md` +
-`docs/mcp-clients.md`. Skills: `reksicherung-bootstrap` (source build),
-`reksicherung-add-source`, `reksicherung-restore-check`, `reksicherung-operate`.
+Related: stack without Airon — `reksicherung-bootstrap` + `docs/getting-started.md` +
+`docs/mcp-clients.md` (same GHCR images). Also: `reksicherung-add-source`,
+`reksicherung-restore-check`, `reksicherung-operate`.
 
 ## Inputs (ask if missing)
 
@@ -188,8 +188,8 @@ Substitute these into `job/airon.yaml` MCP args (see `templates/airon-mcp-stdio.
 
 ## Do not
 
-- Build images unless the operator explicitly wants source build → use
-  `reksicherung-bootstrap` instead.
+- Build images unless the operator is a developer iterating on this repo
+  (see bootstrap “Developers only”). Prefer GHCR for all lab/operator bring-up.
 - Use `compose run -i` for Airon MCP on Windows.
 - Put per-source S3/restic keys in compose `.env`.
 - Invent catalog ids, backup paths, restored DB names, or PASS verdicts.
