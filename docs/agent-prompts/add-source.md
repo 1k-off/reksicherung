@@ -10,4 +10,5 @@ Slots:
 - `database_name`
 - OpenBao field values for `I-OPENBAO-SOURCE` (never echo secrets back in full)
 
-Validate with `reksicherung validate` before finishing.
+Validate with `reksicherung validate` before finishing. If provider YAML is not
+ready yet, use `docs/agent-prompts/configgen.md` first.

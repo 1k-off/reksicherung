@@ -188,11 +188,20 @@ internal/reksicherung/
   configgen/input/                    # shared I-CONFIGGEN YAML model
   configgen/gobackup/                 # optional GoBackup generator
   configgen/resticprofile/            # optional resticprofile generator
-skills/reksicherung-restore-check/
-  SKILL.md                            # restore/check skill runbook
+skills/
+  reksicherung-index/                 # journey map for operators/agents
+  reksicherung-bootstrap/
+  reksicherung-configgen/
+  reksicherung-add-source/
+  reksicherung-restore-check/
+  reksicherung-schedule-verify/
+  reksicherung-operate/
+  reksicherung-airon-onboard/         # optional Airon lab pack
 examples/compose/                     # operator Docker Compose reference
 docs/
   decisions/
+  inputs.md                           # AI input registry
+  agent-prompts/                      # companion prompts for skills
 ```
 
 Restore MCP services and SQL Server share operator-mounted staging/backup volumes. Reksicherung never starts or removes those services.

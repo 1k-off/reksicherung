@@ -29,6 +29,12 @@ together. Correlate by Reksicherung `run_id` and optional `external_run_id`.
 3. Confirm inventory still lists the source.
 4. Re-run restore-check for the single `source_id` after fixes.
 
+## Related
+
+- Re-run checks: `reksicherung-restore-check`
+- Coverage / schedules: `reksicherung-schedule-verify`
+- Journey map: `reksicherung-index`
+
 ## Fail closed
 
 Do not restart production databases, publish SQL ports, or paste secrets into

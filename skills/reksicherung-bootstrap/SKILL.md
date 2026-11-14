@@ -29,6 +29,12 @@ documented inputs (`docs/inputs.md`).
    tools manually / via other automation.
 10. Do not enable schedules until a dry-run PASS (restore-check skill).
 
+## Next
+
+- Generate provider YAML: `reksicherung-configgen`
+- Register sources: `reksicherung-add-source`
+- Journey map: `reksicherung-index`
+
 ## Fail closed
 
 - Missing required compose keys or OpenBao fields → stop.

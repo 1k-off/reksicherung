@@ -20,6 +20,12 @@ Add one database/backup source without editing compose `.env` storage keys.
 5. `reksicherung catalog -config <catalog>` → refresh inventory for the next run.
 6. Optional: dry-run restore-check for that `source_id` only.
 
+## Prerequisites / related
+
+- Provider configs: `reksicherung-configgen` (`I-CONFIGGEN` → gobackup/resticprofile)
+- After register: `reksicherung-restore-check`, then `reksicherung-schedule-verify`
+- Journey map: `reksicherung-index`
+
 ## Fail closed
 
 - Invalid fixture style (`fixtures/invalid/catalog.with-storage.yaml`) must be

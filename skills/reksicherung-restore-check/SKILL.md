@@ -41,6 +41,12 @@ Inputs: `docs/inputs.md` (`I-INVENTORY`, `I-PROMPT`). Schemas under `docs/schema
 7. **Cleanup** — drop if `delete`; otherwise report held DB name. Complete
    semantic review before drop when `cleanup=delete`.
 
+## Next
+
+- Recurring coverage: `reksicherung-schedule-verify`
+- Triage / hold cleanup: `reksicherung-operate`
+- Journey map: `reksicherung-index`
+
 ## Hard rules
 
 - Always pass `source_id` from inventory; never invent storage credentials.
