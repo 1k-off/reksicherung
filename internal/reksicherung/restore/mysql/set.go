@@ -47,8 +47,10 @@ var (
 	charsetSetVars = map[string]bool{
 		"character_set_client": true, "character_set_connection": true, "character_set_results": true,
 	}
-	// User variables mysqldump uses to save and restore sql_mode. They may only
-	// ever be assigned from @@sql_mode, so restoring from them is safe.
+	// User variables mysqldump uses to save sql_mode. Assignments to them are
+	// restricted to @@sql_mode, but restores from them are never trusted: any
+	// user variable can also be written by SELECT ... INTO, so a restore from
+	// one is replaced by a noop.
 	savedSQLModeVars = map[string]bool{"old_sql_mode": true, "saved_sql_mode": true}
 )
 
@@ -212,7 +214,7 @@ func checkSysVarAssignment(name string, value setValue) (string, error) {
 	}
 	switch {
 	case name == "sql_mode":
-		return "", checkSQLModeValue(value)
+		return checkSQLModeValue(value)
 	case charsetSetVars[name]:
 		switch value.kind {
 		case valString, valWord:
@@ -258,26 +260,26 @@ func checkSysVarAssignment(name string, value setValue) (string, error) {
 }
 
 // checkSQLModeValue accepts a literal mode list without the modes that change
-// quoting rules, or a restore from mysqldump's saved-mode variables.
-func checkSQLModeValue(value setValue) error {
+// quoting rules. A restore from a user variable (mysqldump's @OLD_SQL_MODE) is
+// replaced by a noop: the variable may have been poisoned via
+// SELECT ... INTO, so the session keeps its last allowlisted mode.
+func checkSQLModeValue(value setValue) (string, error) {
 	switch value.kind {
 	case valUserVar:
-		if savedSQLModeVars[value.text] {
-			return nil
-		}
+		return setNoopAssignment, nil
 	case valString:
 		lower := strings.ToLower(value.text)
 		if !sqlModeValRe.MatchString(lower) {
-			return ErrInvalidDump
+			return "", ErrInvalidDump
 		}
 		for _, mode := range strings.Split(lower, ",") {
 			for _, forbidden := range forbiddenSQLModes {
 				if mode == forbidden {
-					return ErrInvalidDump
+					return "", ErrInvalidDump
 				}
 			}
 		}
-		return nil
+		return "", nil
 	}
-	return ErrInvalidDump
+	return "", ErrInvalidDump
 }

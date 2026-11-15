@@ -163,7 +163,6 @@ func TestRewriteBypassShapesFailClosed(t *testing.T) {
 		"ansi quotes":                  "SET sql_mode='ANSI_QUOTES';\n",
 		"ansi mode":                    "/*!40101 SET SQL_MODE='ANSI' */;\n",
 		"no backslash escapes":         "SET @@SESSION.sql_mode = 'NO_BACKSLASH_ESCAPES';\n",
-		"sql_mode from variable":       "SET @a='ANSI_QUOTES'; SET sql_mode=@a;\n",
 		"sql_mode expression":          "SET sql_mode=CONCAT('ANSI','_QUOTES');\n",
 		"old sql mode poisoned":        "SET @OLD_SQL_MODE='ANSI_QUOTES';\n",
 		"system after comment":         "/* c */ system id\n",
@@ -194,7 +193,7 @@ func TestRewriteBypassShapesAcceptedForms(t *testing.T) {
 		{"trigger pseudo rows", "CREATE TRIGGER x BEFORE INSERT ON t FOR EACH ROW SET NEW.a = OLD.b;\n",
 			"CREATE TRIGGER x BEFORE INSERT ON t FOR EACH ROW SET NEW.a = OLD.b;\n"},
 		{"sql mode dump", "/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\nSET SQL_MODE=@OLD_SQL_MODE;\n",
-			"/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\nSET SQL_MODE=@OLD_SQL_MODE;\n"},
+			"/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\nSET @reksicherung_noop=0;\n"},
 		{"delimiter triggers", "DELIMITER ;;\nSELECT 1;;\nDELIMITER ;\n", "DELIMITER ;;\nSELECT 1;;\nDELIMITER ;\n"},
 	}
 	for _, test := range tests {
@@ -298,7 +297,6 @@ func TestRewriteSetStatementsAcceptedForms(t *testing.T) {
 		"SET autocommit=0;\n",
 		"SET sql_mode = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION';\n",
 		"SET @@session.sql_mode='NO_ENGINE_SUBSTITUTION';\n",
-		"SET SQL_MODE=@OLD_SQL_MODE;\n",
 	}
 	for _, in := range passthrough {
 		t.Run(strings.TrimSpace(in), func(t *testing.T) {
@@ -320,6 +318,17 @@ func TestRewriteSetStatementsAcceptedForms(t *testing.T) {
 			"/*!40101 SET @reksicherung_noop=0 */;\n"},
 		{"restore old collation", "/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;\n",
 			"/*!40101 SET @reksicherung_noop=0 */;\n"},
+		{"restore sql_mode old", "SET SQL_MODE=@OLD_SQL_MODE;\n", "SET @reksicherung_noop=0;\n"},
+		{"restore sql_mode saved", "SET sql_mode=@saved_sql_mode;\n", "SET @reksicherung_noop=0;\n"},
+		{"restore sql_mode other var", "SET @a='ANSI_QUOTES'; SET sql_mode=@a;\n", "SET @a='ANSI_QUOTES'; SET @reksicherung_noop=0;\n"},
+		{"restore sql_mode in list", "/*!40101 SET sql_mode=@OLD_SQL_MODE, @a=1 */;\n", "/*!40101 SET @reksicherung_noop=0, @a=1 */;\n"},
+		// Regression: a variable poisoned via SELECT ... INTO must not restore sql_mode.
+		{"poison then restore sql_mode",
+			"SELECT 'NO_BACKSLASH_ESCAPES' INTO @old_sql_mode;\nSET sql_mode=@old_sql_mode;\n",
+			"SELECT 'NO_BACKSLASH_ESCAPES' INTO @old_sql_mode;\nSET @reksicherung_noop=0;\n"},
+		{"poison then restore sql_mode wrapped",
+			"SELECT 'NO_BACKSLASH_ESCAPES' INTO @OLD_SQL_MODE;\n/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;\n",
+			"SELECT 'NO_BACKSLASH_ESCAPES' INTO @OLD_SQL_MODE;\n/*!40101 SET @reksicherung_noop=0 */;\n"},
 		{"restore plain", "SET character_set_connection = @x;\n", "SET @reksicherung_noop=0;\n"},
 		{"restore in list", "SET @a = 1, character_set_client = @a;\n", "SET @a = 1, @reksicherung_noop=0;\n"},
 	}
