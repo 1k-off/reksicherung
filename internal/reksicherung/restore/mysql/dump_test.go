@@ -428,3 +428,22 @@ func TestRewriteLongInsertLineMultiStatementFailsClosed(t *testing.T) {
 		t.Fatalf("boundary err=%v, want ErrInvalidDump", err)
 	}
 }
+
+func TestRewriteUnterminatedConstructsAtEOFFailClosed(t *testing.T) {
+	for name, in := range map[string]string{
+		"single quote": "INSERT INTO t VALUES ('abc",
+		"double quote": "INSERT INTO t VALUES (\"abc",
+		"backtick":     "CREATE TABLE `t",
+		"block":        "CREATE TABLE t(i INT); /* unterminated",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := RewriteDump(strings.NewReader(in), "app", "reksicherung_abc"); !errors.Is(err, ErrInvalidDump) {
+				t.Fatalf("err=%v, want ErrInvalidDump", err)
+			}
+		})
+	}
+	// A trailing line comment without a newline is a complete dump.
+	if _, err := RewriteDump(strings.NewReader("CREATE TABLE t(i INT);\n-- done"), "app", "reksicherung_abc"); err != nil {
+		t.Fatalf("trailing line comment: err=%v", err)
+	}
+}

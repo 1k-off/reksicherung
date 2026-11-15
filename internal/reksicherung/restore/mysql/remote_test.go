@@ -109,7 +109,8 @@ func TestRestoreDumpCreatesImportsAndRemovesCredentialFile(t *testing.T) {
 	}
 	imp := runner.calls[1]
 	if imp.args[len(imp.args)-1] != database || !containsArg(imp.args, "--binary-mode") ||
-		!containsArg(imp.args, "--local-infile=0") || !containsArg(imp.args, "--default-character-set=utf8mb4") {
+		!containsArg(imp.args, "--local-infile=0") || !containsArg(imp.args, "--default-character-set=utf8mb4") ||
+		!containsArg(imp.args, "--init-command=SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION'") {
 		t.Fatalf("import argv = %#v", imp.args)
 	}
 	if strings.Contains(imp.stdin, "`app`") || !strings.Contains(imp.stdin, "USE `"+database+"`;") ||

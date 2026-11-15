@@ -3,6 +3,10 @@
 Human copy-paste for `examples/compose/`. Skills and AI prompts should point here
 instead of inventing OpenBao/SQL steps.
 
+**Working directory:** after `cd examples/compose` in §1, every command in this
+runbook runs from `examples/compose` (`docker compose --env-file .env …`). Steps
+that need the repository root say so explicitly.
+
 **Related:** [`docs/getting-started.md`](../../docs/getting-started.md) ·
 [`docs/schemas/openbao-source-kv.md`](../../docs/schemas/openbao-source-kv.md) ·
 [`.env.example`](.env.example)
@@ -93,8 +97,7 @@ for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect \
   docker pull "ghcr.io/1k-off/reksicherung/${i}:${TAG}"
 done
 
-docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env \
-  up -d openbao sqlserver cleanup-reconciler
+docker compose --env-file .env up -d openbao sqlserver cleanup-reconciler
 
 # Restore MCP runs as uid 65532; volume is often root-owned after first SQL start
 docker run --rm -v reksicherung_sql-backup:/var/opt/mssql/backup alpine \
@@ -137,8 +140,7 @@ Skip unless a catalog source uses `database.type: mysql` (logical
 `MYSQL_ROOT_PASSWORD` in `.env` (no `$`, `&`, `%`), then:
 
 ```bash
-docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env \
-  --profile mysql up -d mysql
+docker compose --env-file .env --profile mysql up -d mysql
 ```
 
 Create a restore account limited to run-scoped databases (never grant `FILE`,
@@ -219,12 +221,12 @@ bao kv put secret/reksicherung/sources/demo-app-a \
 ## 9. Catalog validate
 
 ```bash
-# With a local Go toolchain from repo root:
-go run ./cmd/reksicherung validate -config examples/catalog.example.yaml
-go run ./cmd/reksicherung catalog -config examples/catalog.example.yaml
+# With a local Go toolchain (subshell runs from the repo root, CWD unchanged):
+(cd ../.. && go run ./cmd/reksicherung validate -config examples/catalog.example.yaml)
+(cd ../.. && go run ./cmd/reksicherung catalog -config examples/catalog.example.yaml)
 
-# Or GHCR CLI (mount your catalog):
-docker run --rm -v "$PWD/examples:/examples:ro" \
+# Or GHCR CLI (mount the repo examples/ directory, i.e. ..):
+docker run --rm -v "$PWD/..:/examples:ro" \
   ghcr.io/1k-off/reksicherung/cli:latest \
   validate -config /examples/catalog.example.yaml
 ```
@@ -258,6 +260,7 @@ as a **literal** (do not interpolate a Windows host path).
 | Task | Action |
 | --- | --- |
 | After reboot | Unseal OpenBao; `up -d` stack; re-`chmod 1777` sql-backup if volume recreated |
+| hold_for_review register | `reksicherung hold -registry … -run-id … -database-type sqlserver\|mysql -verdict …` (required for held runs; `-database-type` routes the later drop) |
 | hold_for_review drop | `reksicherung cleanup -registry … -run-id …` (skill `reksicherung-operate`) |
 | Triage FAIL | Evidence + OpenBao source KV + inventory; see `docs/operations.md` |
 

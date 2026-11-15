@@ -57,7 +57,10 @@ for the process lifetime and restart processes on rotation.
 | Mode | Behavior |
 | --- | --- |
 | `delete` | Drop run-scoped DB after the run; reconciler retries on lease expiry |
-| `hold_for_review` | Keep DB; operator runs `reksicherung cleanup` |
+| `hold_for_review` | Keep DB; register with `reksicherung hold -database-type sqlserver\|mysql`, later `reksicherung cleanup` |
+
+A held run **must** be registered with `reksicherung hold` (explicit
+`-database-type`); a record without `database_type` is treated as `sqlserver`.
 
 Reconciler routes drops by the recorded `database_type` (`sqlserver` via
 `sqlcmd`, `mysql` via the `mysql` client; both in the `cli` image) and never

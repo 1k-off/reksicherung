@@ -61,7 +61,9 @@ create, start, or stop containers.
    `database_name=<name> restored_database=<reksicherung_…|none> run_id=<id>`
 7. **Cleanup** — `cleanup=delete` → `restore__sqlserver_drop_restore_database` /
    `mysql_restore__mysql_drop_restore_database`;
-   `hold_for_review` → report held `restored_database` and skip drop.
+   `hold_for_review` → report held `restored_database`, skip drop, and tell the
+   operator to register it: `reksicherung hold -registry <runs.db> -run-id <id>
+   -database-type <sqlserver|mysql> -verdict <pass|fail|inconclusive>`.
 
 ## Hard rules
 

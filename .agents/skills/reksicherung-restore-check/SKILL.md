@@ -70,8 +70,13 @@ staged `kind` does not match the type (e.g. `bak` for `mysql`) — verdict `FAIL
      replaced; never inspect the source database name.
 6. **Verdict** — `PASS` / `FAIL` / `INCONCLUSIVE`; never invent PASS.
 7. **Cleanup** — drop (`sqlserver_drop_restore_database` /
-   `mysql_drop_restore_database`) if `delete`; otherwise report held DB name.
-   Complete semantic review before drop when `cleanup=delete`.
+   `mysql_drop_restore_database`) if `delete`. Complete semantic review before
+   drop when `cleanup=delete`.
+   - `hold_for_review`: report the held DB name **and register the run** so
+     later cleanup routes to the right engine (do not skip — an unrecorded
+     type defaults to `sqlserver` and mis-routes MySQL drops):
+     `reksicherung hold -registry <runs.db> -run-id <run_id> -database-type <sqlserver|mysql> -verdict <pass|fail|inconclusive>`
+     (`mysql` when `database.type=mysql`).
 
 ## Next
 

@@ -15,6 +15,12 @@ import (
 const (
 	defaultMySQLCmd      = "mysql"
 	defaultMySQLCheckCmd = "mysqlcheck"
+
+	// importInitCommand pins the import session sql_mode so a server-wide or
+	// account-level default (e.g. ANSI_QUOTES, NO_BACKSLASH_ESCAPES) cannot
+	// change how the validated dump text is parsed. Dump SET sql_mode
+	// statements are still allowlisted by the rewriter.
+	importInitCommand = "SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION'"
 )
 
 // RemoteCommandRunner runs a bounded executable locally in the MCP process.
@@ -137,7 +143,7 @@ func (operations *RemoteOperations) RestoreDump(ctx context.Context, runID strin
 		}
 		_, runErr := operations.run(operationCtx, operations.config.Timeout, operations.config.MySQL,
 			[]string{"--defaults-extra-file=" + defaults, "--binary-mode", "--local-infile=0",
-				"--default-character-set=utf8mb4", "--batch", database}, rewriter)
+				"--init-command=" + importInitCommand, "--default-character-set=utf8mb4", "--batch", database}, rewriter)
 		if err := rewriter.Err(); err != nil {
 			return sanitizeCommandError(operationCtx, err)
 		}

@@ -732,10 +732,13 @@ func (rewriter *DumpRewriter) finishStatement() {
 
 // finish flushes lexer state at end of input.
 func (rewriter *DumpRewriter) finish() {
+	// An unterminated string, identifier, or block comment at EOF is not a
+	// complete dump. A trailing "--"/"#" line comment without a newline is valid.
 	switch rewriter.state {
-	case lexBacktick:
-		rewriter.emit(append([]byte{'`'}, rewriter.ident...))
-		rewriter.state = lexCode
+	case lexCode, lexLine:
+	default:
+		rewriter.fail(ErrInvalidDump)
+		return
 	}
 	if rewriter.wordMode != wordNone {
 		rewriter.endWord()

@@ -73,3 +73,40 @@ func (opener *fakeResticFileOpener) OpenBackupFile(_ context.Context, selection 
 	opener.selection, opener.path = selection, path
 	return opener.snapshot, io.NopCloser(bytes.NewReader(opener.data)), nil
 }
+
+func TestResticArtifactStagerStagesSQLDump(t *testing.T) {
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	member, err := writer.Create("db/app.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dump := "USE `app`;\n"
+	if _, err := member.Write([]byte(dump)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := staging.New(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &fakeResticFileOpener{
+		snapshot: resticrestore.Snapshot{ID: strings.Repeat("b", 64)},
+		data:     archive.Bytes(),
+	}
+	stager, err := newResticArtifactStager(source, store, artifact.Limits{
+		MaxInputBytes: 1 << 20, MaxExpandedBytes: 1 << 20, MaxTemporaryBytes: 2 << 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := stager.Stage(context.Background(), source.snapshot.ID, "/backups/db.zip")
+	if err != nil {
+		t.Fatalf("Stage() error = %v", err)
+	}
+	if result.Kind != staging.KindSQL || result.Size != int64(len(dump)) || result.SnapshotID != source.snapshot.ID {
+		t.Fatalf("staged = %#v", result)
+	}
+}
