@@ -1,0 +1,6 @@
+{
+  "HOST": "mysql",
+  "PORT": "3306",
+  "USERNAME": "reksicherung_restore",
+  "PASSWORD": "ReplaceWithStrongPassword_123"
+}

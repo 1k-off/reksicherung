@@ -9,6 +9,7 @@ Project boundary: **one OpenBao** (or dedicated mount/namespace) per restore-che
 | `secret/reksicherung/defaults` | `openbao-defaults.schema.json` |
 | `secret/reksicherung/sources/<source_id>` | `openbao-source.schema.json` |
 | `secret/reksicherung/sqlserver` | `openbao-sqlserver.schema.json` |
+| `secret/reksicherung/mysql` | `openbao-mysql.schema.json` |
 
 `<source_id>` equals `BackupCatalog.backups[].id`.
 
@@ -68,6 +69,18 @@ bao kv put secret/reksicherung/sqlserver \
 ```
 
 SQL Server fields (`HOST`, `USERNAME`, `PASSWORD`; `PORT` optional, default `1433`) are shared by restore, inspect, and cleanup MCPs via `secrets.ResolveSQLServer`.
+
+## MySQL
+
+```bash
+bao kv put secret/reksicherung/mysql \
+  HOST=mysql \
+  PORT=3306 \
+  USERNAME=reksicherung_restore \
+  PASSWORD='...'
+```
+
+MySQL fields (`HOST`, `USERNAME`, `PASSWORD`; `PORT` optional, default `3306`) are resolved via `secrets.ResolveMySQL` for catalog sources with `database.type: mysql`. Inventory checks use `mysql-integrity` for those sources.
 
 Runtime refs for sources are assembled automatically, e.g.
 `openbao://secret/reksicherung/sources/demo-app-a#S3_ACCESS_KEY_ID`.

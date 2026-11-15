@@ -36,7 +36,7 @@
           "additionalProperties": false,
           "required": ["type", "name"],
           "properties": {
-            "type": { "const": "sqlserver" },
+            "type": { "enum": ["sqlserver", "mysql"] },
             "name": { "type": "string", "minLength": 1, "maxLength": 128 }
           }
         },

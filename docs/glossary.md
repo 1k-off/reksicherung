@@ -10,6 +10,7 @@ Short terms used in operator docs and skills. Full contracts: [`inputs.md`](inpu
 | **OpenBao** | Operator-managed secret store (KV v2). Holds defaults, per-source storage creds, and SQL restore connection. |
 | **defaults** | `secret/reksicherung/defaults` — shared storage fields merged under each source. |
 | **sqlserver KV** | `secret/reksicherung/sqlserver` — `HOST`, `USERNAME`, `PASSWORD` (+ optional `PORT`) for restore/inspect/cleanup. |
+| **mysql KV** | `secret/reksicherung/mysql` — `HOST`, `USERNAME`, `PASSWORD` (+ optional `PORT`, default 3306) for MySQL restore-check (`database.type: mysql`). |
 | **STORAGE_TYPE** | Required after merge: `s3` or `azure`. |
 | **provider** | Backup engine for a source: `gobackup` or `restic`. |
 | **configgen (`I-CONFIGGEN`)** | Optional backup-as-code YAML → GoBackup / resticprofile files. Skip if backups already exist. |
