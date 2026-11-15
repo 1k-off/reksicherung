@@ -108,7 +108,8 @@ func TestRestoreDumpCreatesImportsAndRemovesCredentialFile(t *testing.T) {
 		t.Fatalf("create argv = %#v", create.args)
 	}
 	imp := runner.calls[1]
-	if imp.args[len(imp.args)-1] != database || !containsArg(imp.args, "--binary-mode") {
+	if imp.args[len(imp.args)-1] != database || !containsArg(imp.args, "--binary-mode") ||
+		!containsArg(imp.args, "--local-infile=0") {
 		t.Fatalf("import argv = %#v", imp.args)
 	}
 	if strings.Contains(imp.stdin, "`app`") || !strings.Contains(imp.stdin, "USE `"+database+"`;") ||

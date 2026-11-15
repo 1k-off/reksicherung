@@ -136,7 +136,7 @@ func (operations *RemoteOperations) RestoreDump(ctx context.Context, runID strin
 			return err
 		}
 		_, runErr := operations.run(operationCtx, operations.config.Timeout, operations.config.MySQL,
-			[]string{"--defaults-extra-file=" + defaults, "--binary-mode", "--batch", database}, rewriter)
+			[]string{"--defaults-extra-file=" + defaults, "--binary-mode", "--local-infile=0", "--batch", database}, rewriter)
 		if err := rewriter.Err(); err != nil {
 			return sanitizeCommandError(operationCtx, err)
 		}

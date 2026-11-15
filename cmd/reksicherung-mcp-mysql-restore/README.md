@@ -50,7 +50,10 @@ Optional:
 Passwords are written only to a `0600` `--defaults-extra-file` that is removed
 after each command; they never appear in argv, environment, or MCP responses.
 Commands use argv (no shell), cap output, and sanitize errors. The client runs
-with `--binary-mode`. The rewriter is line-oriented and conservative; it does
-not parse SQL, so statements embedded mid-line are not inspected. Treat the
-target server as disposable. No live MySQL integration test is implied by the
+with `--binary-mode --local-infile=0`. The rewriter lexes the dump (strings,
+identifiers, comments, statement boundaries) and fails closed on `USE`/database
+statements it cannot rewrite, cross-database qualifiers (`other`.`t`, `other.t`;
+table-qualified `t`.`c` is also rejected), `PREPARE`/`EXECUTE`, client
+commands, and `sql_mode` changes that could desynchronise it. It is not a full
+SQL parser; treat the target server as disposable. No live MySQL integration test is implied by the
 unit tests. Staged source artifacts are retained and never deleted by this MCP.
