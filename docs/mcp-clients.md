@@ -13,6 +13,8 @@ ghcr.io/1k-off/reksicherung/mcp-gobackup:<TAG>
 ghcr.io/1k-off/reksicherung/mcp-restic:<TAG>
 ghcr.io/1k-off/reksicherung/mcp-sqlserver-restore:<TAG>
 ghcr.io/1k-off/reksicherung/mcp-sqlserver-inspect:<TAG>
+ghcr.io/1k-off/reksicherung/mcp-mysql-restore:<TAG>
+ghcr.io/1k-off/reksicherung/mcp-mysql-inspect:<TAG>
 ghcr.io/1k-off/reksicherung/cli:<TAG>
 ```
 
@@ -101,10 +103,38 @@ prefer the same runtime you used for compose (`docker` or `podman`).
         "-e", "REKSICHERUNG_SQLSERVER_DATABASE=master",
         "ghcr.io/1k-off/reksicherung/mcp-sqlserver-inspect:latest"
       ]
+    },
+    "reksicherung-mysql-restore": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "--network", "reksicherung_reksicherung",
+        "-e", "REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200",
+        "-e", "REKSICHERUNG_OPENBAO_PLAINTEXT=1",
+        "-e", "REKSICHERUNG_OPENBAO_TOKEN",
+        "-e", "REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts",
+        "-v", "reksicherung_artifact-stage:/var/lib/reksicherung/artifacts",
+        "ghcr.io/1k-off/reksicherung/mcp-mysql-restore:latest"
+      ]
+    },
+    "reksicherung-mysql-inspect": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "--network", "reksicherung_reksicherung",
+        "-e", "REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200",
+        "-e", "REKSICHERUNG_OPENBAO_PLAINTEXT=1",
+        "-e", "REKSICHERUNG_OPENBAO_TOKEN",
+        "ghcr.io/1k-off/reksicherung/mcp-mysql-inspect:latest"
+      ]
     }
   }
 }
 ```
+
+The two `reksicherung-mysql-*` entries are only needed for `database.type: mysql`
+sources (OpenBao `secret/reksicherung/mysql`; no `sql-backup` volume). Leave
+`REKSICHERUNG_MYSQL_DATABASE` unset on inspect and pass the restore `run_id`.
 
 The host must expose `REKSICHERUNG_OPENBAO_TOKEN` in its environment so Docker
 forwards it via `-e REKSICHERUNG_OPENBAO_TOKEN` (value from the environment).
@@ -132,6 +162,18 @@ Summary for a GoBackup `latest` source:
 
 Restic: list/select snapshot → `restic_stage_artifact` with catalog `backupPath`.
 
+### MySQL sources (`database.type: mysql`)
+
+Steps 1–3 are identical (staged `kind` is `sql`). Then:
+
+1. `mysql_restore_backup` with `run_id`, `artifact_id`, `source_database`
+2. `mysql_check_restore_integrity` — **`command_completed` ≠ clean**; it only
+   means `mysqlcheck` exited without error
+3. Optional `mysql_list_tables` / `mysql_describe_table` / `mysql_validate_table`
+   with the **same** `run_id`; remap `expectedEmptyTables`
+   `source_database.table` to the table in the run database
+4. Verdict, then `mysql_drop_restore_database` (`delete`) or hold
+
 Prompt slots: [`schemas/restore-check-prompt.md`](schemas/restore-check-prompt.md).
 
 ## Common failures
@@ -142,6 +184,8 @@ Prompt slots: [`schemas/restore-check-prompt.md`](schemas/restore-check-prompt.m
 | Restore fails in milliseconds | `chmod 1777` on `reksicherung_sql-backup`; OpenBao SQL password matches SA/login |
 | Discovery OK, stage fails | Check OpenBao source KV / network to object storage; mark FAIL, do not invent PASS |
 | Inspect sees `master` only | Pass restore `run_id` into inspect tools |
+| MySQL inspect: no database / cannot inspect `information_schema` | Pass restore `run_id` (derives `reksicherung_<hash>`) |
+| MySQL restore rejects dump | Dump must reference only `source_database` (single-database); see `cmd/reksicherung-mcp-mysql-restore/README.md` |
 
 More Windows/Podman notes (also apply without Airon):
 [`.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md`](../.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md).

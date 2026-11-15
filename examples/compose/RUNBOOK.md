@@ -88,7 +88,8 @@ developing this repository (see bootstrap skill “Developers only”).
 
 ```bash
 TAG="${REKSICHERUNG_IMAGE_TAG:-latest}"   # optional; also set in .env
-for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect cli; do
+for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect \
+         mcp-mysql-restore mcp-mysql-inspect cli; do
   docker pull "ghcr.io/1k-off/reksicherung/${i}:${TAG}"
 done
 
@@ -125,6 +126,40 @@ docker compose --env-file .env exec -T \
 
 Changing `.env` later does **not** change the SA password already stored in the
 SQL data volume.
+
+## 6b. Optional: MySQL restore target (`database.type: mysql`)
+
+Skip unless a catalog source uses `database.type: mysql` (logical
+`.sql` / `.sql.gz` dumps). Set `MYSQL_ROOT_PASSWORD` in `.env`, then:
+
+```bash
+docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env \
+  up -d mysql
+```
+
+Create a restore account limited to run-scoped databases (never grant `FILE`,
+`SUPER`, or access to other schemas):
+
+```sql
+CREATE USER 'reksicherung_restore'@'%' IDENTIFIED BY 'SameAsOpenBaoPassword_123';
+GRANT ALL PRIVILEGES ON `reksicherung\_%`.* TO 'reksicherung_restore'@'%';
+```
+
+Seed OpenBao (inside the compose network the host is `mysql`, port `3306`):
+
+```bash
+docker compose --env-file .env exec -T \
+  -e BAO_ADDR=http://127.0.0.1:8200 \
+  -e BAO_TOKEN \
+  openbao bao kv put secret/reksicherung/mysql \
+  HOST=mysql \
+  PORT=3306 \
+  USERNAME=reksicherung_restore \
+  PASSWORD='SameAsOpenBaoPassword_123'
+```
+
+`cleanup-reconciler` drops held/expired MySQL run databases with the `mysql`
+client bundled in the `cli` image, using this same secret.
 
 ## 7. Optional: dedicated restore login
 
@@ -198,6 +233,10 @@ Shared mounts required between provider + restore MCP:
 
 - `reksicherung_artifact-stage` → `/var/lib/reksicherung/artifacts`
 - `reksicherung_sql-backup` → `/var/opt/mssql/backup` (restore + SQL Server)
+
+MySQL (`mcp-mysql-restore`, `mcp-mysql-inspect`) needs only
+`reksicherung_artifact-stage` (restore) and no `sql-backup` volume; inspect
+needs no volumes. Pass the restore `run_id` to every inspect call.
 
 Always set `REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts`
 as a **literal** (do not interpolate a Windows host path).

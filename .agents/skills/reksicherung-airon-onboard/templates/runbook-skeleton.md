@@ -56,6 +56,7 @@ Secrets: OpenBao KV, not catalog. Example ids in prompts are fictional
 - Network: GHCR pull; MCP → object storage
 
 Images: `ghcr.io/1k-off/reksicherung/{mcp-gobackup,mcp-restic,mcp-sqlserver-restore,mcp-sqlserver-inspect,cli}:<TAG>`
+(MySQL sources additionally: `mcp-mysql-restore`, `mcp-mysql-inspect`, and `mysql:8.4`)
 
 ## Setup
 
@@ -93,7 +94,8 @@ Keep `openbao-init.json` secret; gitignore it.
 
 Write `secret/reksicherung/defaults`, `secret/reksicherung/sqlserver`
 (`HOST=sqlserver`, `USERNAME=sa`, `PASSWORD=<MSSQL_SA_PASSWORD>`), and per-source
-KV. Schema: `docs/schemas/openbao-source-kv.md`.
+KV. Schema: `docs/schemas/openbao-source-kv.md`. MySQL sources: also
+`secret/reksicherung/mysql` (`HOST=mysql`, `PORT=3306`, restricted account).
 
 ### Optional catalog validate
 

@@ -36,20 +36,30 @@ create, start, or stop containers.
    - On `code=ambiguous_archive`: `gobackup__gobackup_list_archive_candidates`,
      pick `member_path` using `database.name` + hints, retry. Still ambiguous →
      `FAIL:` — do not invent a path.
-3. **Restore** — `restore__sqlserver_restore_backup` with short `run_id`
+   Keep `kind`: `bak`/`bacpac` → SQL Server; `sql` → MySQL.
+   **Branch on `database.type`** (catalog; default `sqlserver`) and use only
+   that family below (`restore__`/`inspect__sqlserver_*` vs
+   `mysql_restore__`/`mysql_inspect__mysql_*`). Mismatched `kind` → `FAIL:`.
+3. **Restore** — `restore__sqlserver_restore_backup` (sqlserver) or
+   `mysql_restore__mysql_restore_backup` (mysql) with short `run_id`
    (≤128, `[A-Za-z0-9._-]`), `artifact_id`, `source_database` (= catalog
    `database.name`). From the tool JSON record:
    - `database_name` = `source_database`
    - `restored_database` = result `database` (`reksicherung_<32hex>`)
    Never invent the restored name.
-4. **Integrity** — `restore__sqlserver_check_restore_integrity` with same `run_id`.
-5. **Semantic review** (when enabled) — inspect tools with the **same** `run_id`
-   (targets `reksicherung_*`, not `master`). If inspect cannot see the DB →
-   `FAIL: inconclusive — …`.
+4. **Integrity** — `restore__sqlserver_check_restore_integrity` or
+   `mysql_restore__mysql_check_restore_integrity` with same `run_id`.
+   `command_completed` ≠ clean: it only means the check command exited
+   without error. Never write "clean"; a non-completed check is `FAIL:`.
+5. **Semantic review** (when enabled) — matching-family inspect tools with the
+   **same** `run_id` (targets `reksicherung_*`, not `master`). For MySQL remap
+   catalog `expectedEmptyTables` `source_database.table` → table name in the
+   run DB. If inspect cannot see the DB → `FAIL: inconclusive — …`.
 6. **Verdict** — final line `PASS:` or `FAIL:` only (never `INCONCLUSIVE:` —
    Airon `pass_fail` ignores it). Include:
    `database_name=<name> restored_database=<reksicherung_…|none> run_id=<id>`
-7. **Cleanup** — `cleanup=delete` → `restore__sqlserver_drop_restore_database`;
+7. **Cleanup** — `cleanup=delete` → `restore__sqlserver_drop_restore_database` /
+   `mysql_restore__mysql_drop_restore_database`;
    `hold_for_review` → report held `restored_database` and skip drop.
 
 ## Hard rules

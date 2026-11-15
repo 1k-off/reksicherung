@@ -19,6 +19,7 @@ Paths A and B both use **GHCR** (`latest` or a pinned tag). Do not `compose buil
 ## Ask once (decision checklist)
 
 1. **Backup tool:** GoBackup or Restic?
+   **Database engine:** SQL Server (`.bak`/`.bacpac`) or MySQL (logical `.sql`/`.sql.gz` dump)? Sets catalog `database.type` (`sqlserver` default, or `mysql`) and the OpenBao secret (`sqlserver` vs `mysql`).
 2. **Storage:** S3-compatible or Azure? (`STORAGE_TYPE` required)
 3. **Already have backups in object storage?**  
    - Yes → skip configgen; go to catalog + OpenBao source.  
@@ -46,12 +47,12 @@ Airon + LLM only for path B.
 You / MCP host
     │  stdio
     ▼
-MCP images (gobackup | restic | sqlserver-restore | inspect)
+MCP images (gobackup | restic | sqlserver-restore | sqlserver-inspect | mysql-restore | mysql-inspect)
     │  OpenBao token only in env
     ▼
 OpenBao KV  ──secrets──►  object storage + SQL connection
     │
-SQL Server (isolated restore target)  ◄── shared volumes: artifacts + sql-backup
+SQL Server / MySQL (isolated restore targets)  ◄── shared volumes: artifacts (+ sql-backup for SQL Server)
 cleanup-reconciler (optional but recommended)
 ```
 
@@ -64,6 +65,7 @@ Reksicherung never creates or removes those containers from restore-check skills
 Follow skill [`reksicherung-bootstrap`](../.agents/skills/reksicherung-bootstrap/SKILL.md)
 and **all** steps in [`examples/compose/RUNBOOK.md`](../examples/compose/RUNBOOK.md)
 (pull GHCR → OpenBao → SQL → reconciler → seed → `chmod 1777`). Do not build images.
+For MySQL sources also follow RUNBOOK §6b (`mysql` service + `secret/reksicherung/mysql`).
 
 ### 2. Register one source
 
@@ -107,11 +109,12 @@ Lab tip: `hold_for_review` keeps the DB so you can inspect it; drop later with
 
 ### 5. Done when
 
-- [ ] OpenBao unsealed; KV has `sqlserver` + your `sources/<id>`
+- [ ] OpenBao unsealed; KV has `sqlserver` (or `mysql` for MySQL sources) + your `sources/<id>`
 - [ ] SQL up; sql-backup volume mode allows uid `65532` writes
 - [ ] `validate` + `catalog` succeed
 - [ ] MCP tools reachable
 - [ ] One run reaches restore (or fails with a **real** MCP/storage error — not a guessed PASS)
+- [ ] Integrity `command_completed` is treated as "check ran", not "clean"
 - [ ] No secrets in catalog or committed `.env`
 
 ### 6. Only after a good dry-run

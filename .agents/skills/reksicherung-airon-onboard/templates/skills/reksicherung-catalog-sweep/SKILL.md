@@ -36,6 +36,10 @@ For a single ad-hoc id, use `reksicherung-restore-one` / `airon.yaml` instead.
 
 Same as `reksicherung-restore-one` (discover → stage → restore → integrity →
 cleanup). Short unique `run_id` per source (`rc-1`, `rc-2`, …).
+Branch per source on catalog `database.type` (default `sqlserver`): use
+`restore__sqlserver_*` / `inspect__sqlserver_*` or
+`mysql_restore__mysql_*` / `mysql_inspect__mysql_*` — never mix families.
+`command_completed` from integrity ≠ clean; record "check completed", not "clean".
 
 1. Discover (matching provider; gobackup miss on restic is OK).
 2. Stage — restic needs exact `backupPath` from the catalog row; never invent.
@@ -68,7 +72,8 @@ After each source, `fs_write`:
 ```
 
 Do not invent `restored_database` — copy the `database` field from
-`restore__sqlserver_restore_backup` (or integrity/drop) only.
+`restore__sqlserver_restore_backup` / `mysql_restore__mysql_restore_backup`
+(or integrity/drop) only.
 
 ## Registry update (required)
 

@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/reksicherung ./cmd
 FROM mcr.microsoft.com/dotnet/runtime-deps:8.0-bookworm-slim
 USER root
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl apt-transport-https gnupg ca-certificates \
+  && apt-get install -y --no-install-recommends curl apt-transport-https gnupg ca-certificates default-mysql-client \
   && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft.gpg \
   && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/microsoft.gpg] https://packages.microsoft.com/ubuntu/22.04/prod jammy main" \
     > /etc/apt/sources.list.d/mssql-release.list \

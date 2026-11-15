@@ -124,8 +124,9 @@ Use `$RUNTIME` / `$COMPOSE` below; show both bash and PowerShell blocks when the
 target OS is unknown.
 
 1. **Pull** GHCR images (mcp-gobackup, mcp-restic, mcp-sqlserver-restore,
-   mcp-sqlserver-inspect, cli) + `openbao/openbao:2.1.0` +
-   `mcr.microsoft.com/mssql/server:2022-latest`.
+   mcp-sqlserver-inspect, cli; plus mcp-mysql-restore, mcp-mysql-inspect for
+   `database.type: mysql`) + `openbao/openbao:2.1.0` +
+   `mcr.microsoft.com/mssql/server:2022-latest` (and `mysql:8.4` for MySQL).
 2. **Init OpenBao** — `compose up -d openbao` → `bao operator init` (save
    `openbao-init.json`) → unseal → enable `secret/` kv-v2 → write token into
    `compose/.env` as `REKSICHERUNG_OPENBAO_TOKEN`.
@@ -134,7 +135,9 @@ target OS is unknown.
 4. **Seed OpenBao** — `secret/reksicherung/defaults`, `.../sqlserver`
    (`HOST=sqlserver`, `USERNAME=sa`, `PASSWORD=<same as MSSQL_SA_PASSWORD>`),
    and `.../sources/<source_id>` per catalog (see
-   `docs/schemas/openbao-source-kv.md`).
+   `docs/schemas/openbao-source-kv.md`). For MySQL sources also seed
+   `.../mysql` (`HOST=mysql`, `PORT=3306`) and keep the `mysql_restore` /
+   `mysql_inspect` servers + tools from the templates; otherwise drop them.
 5. **Validate catalog** (optional) — cli profile `validate` / `catalog`.
 6. **Airon run** — export LLM key + `REKSICHERUNG_OPENBAO_TOKEN`; `cd job`;
    `airon run --config ./airon.yaml --no-healthchecks --input "..."`.

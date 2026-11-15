@@ -70,3 +70,11 @@ prompts:
       - inspect__sqlserver_describe_table
       - inspect__sqlserver_validate_table
       - inspect__sqlserver_check_integrity
+      # database.type=mysql (requires the mysql_restore / mysql_inspect MCP servers)
+      - mysql_restore__mysql_restore_backup
+      - mysql_restore__mysql_check_restore_integrity
+      - mysql_restore__mysql_drop_restore_database
+      - mysql_inspect__mysql_list_tables
+      - mysql_inspect__mysql_describe_table
+      - mysql_inspect__mysql_validate_table
+      - mysql_inspect__mysql_check_integrity
