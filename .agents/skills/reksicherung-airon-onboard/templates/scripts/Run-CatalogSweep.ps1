@@ -10,7 +10,7 @@
 #     -NoProfile -ExecutionPolicy Bypass -File "<PACKAGE_PATH>\scripts\Run-CatalogSweep.ps1"
 #   Store OPENAI_API_KEY in the task env or User env.
 #
-# Assumes OpenBao + SQL Server (+ reconciler) are already up (managed separately).
+# Assumes OpenBao + SQL Server (+ MySQL if used) + reconciler are already up (managed separately).
 # This script only runs Airon; it does not start/unseal the support stack.
 param(
     [int]$DailyBatch = 2,

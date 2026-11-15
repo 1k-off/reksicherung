@@ -54,8 +54,10 @@ services:
           cpus: "2.0"
           memory: 4G
 
-  # Isolated MySQL restore target (logical .sql/.sql.gz dumps). Optional: start
-  # only when a catalog source has database.type=mysql. The restore MCP creates
+  # Isolated MySQL restore target (logical .sql/.sql.gz dumps). OPT-IN: behind
+  # compose profile `mysql`, so plain `docker compose up` never starts it and
+  # never needs MYSQL_ROOT_PASSWORD. Use `--profile mysql` when a catalog
+  # source has database.type=mysql. The restore MCP creates
   # reksicherung_<hash> databases here; the account must be limited to
   # reksicherung\_% (see cmd/reksicherung-mcp-mysql-restore/README.md).
   mysql:
@@ -69,6 +71,7 @@ services:
       - "127.0.0.1:13306:3306"
     networks: [reksicherung]
     restart: unless-stopped
+    profiles: ["mysql"]
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
@@ -178,7 +181,8 @@ services:
     networks: [reksicherung]
     stdin_open: true
     restart: unless-stopped
-    profiles: ["mcp-stdio"]
+    # `mysql` profile only (not mcp-stdio): depends_on mysql, itself opt-in.
+    profiles: ["mysql"]
     depends_on: [mysql, openbao]
 
   mysql-inspect-mcp:
@@ -195,7 +199,7 @@ services:
     networks: [reksicherung]
     stdin_open: true
     restart: unless-stopped
-    profiles: ["mcp-stdio"]
+    profiles: ["mysql"]
     depends_on: [mysql, openbao]
 
   cleanup-reconciler:

@@ -8,7 +8,8 @@ description: >-
 # Restore one database
 
 Process **exactly one** `source_id` per Airon run. Do not start a second source.
-Operate only on the operator-provisioned SQL Server and MCP services — do not
+Operate only on the operator-provisioned SQL Server / MySQL restore targets and
+MCP services — do not
 create, start, or stop containers.
 
 ## Inputs (operator `--input`)

@@ -103,7 +103,8 @@ docker run --rm -v reksicherung_sql-backup:/var/opt/mssql/backup alpine \
 
 `cleanup-reconciler` uses `ghcr.io/1k-off/reksicherung/cli:$TAG`. MCP hosts
 normally run GHCR images via `docker run -i` ([`docs/mcp-clients.md`](../../docs/mcp-clients.md));
-compose profile `mcp-stdio` is optional.
+compose profile `mcp-stdio` is optional. MySQL services use the separate opt-in
+profile `mysql` (see §6b).
 
 Host SQL port in this compose file: `127.0.0.1:11433` → container `1433`.
 Inside the compose network always use `HOST=sqlserver` and port `1433`.
@@ -130,11 +131,14 @@ SQL data volume.
 ## 6b. Optional: MySQL restore target (`database.type: mysql`)
 
 Skip unless a catalog source uses `database.type: mysql` (logical
-`.sql` / `.sql.gz` dumps). Set `MYSQL_ROOT_PASSWORD` in `.env`, then:
+`.sql` / `.sql.gz` dumps). MySQL is **opt-in via compose profile `mysql`**:
+`mysql`, `mysql-restore-mcp` and `mysql-inspect-mcp` are not started by plain
+`docker compose up` (and do not need `MYSQL_ROOT_PASSWORD`). Uncomment and set
+`MYSQL_ROOT_PASSWORD` in `.env` (no `$`, `&`, `%`), then:
 
 ```bash
 docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env \
-  up -d mysql
+  --profile mysql up -d mysql
 ```
 
 Create a restore account limited to run-scoped databases (never grant `FILE`,
@@ -143,6 +147,14 @@ Create a restore account limited to run-scoped databases (never grant `FILE`,
 ```sql
 CREATE USER 'reksicherung_restore'@'%' IDENTIFIED BY 'SameAsOpenBaoPassword_123';
 GRANT ALL PRIVILEGES ON `reksicherung\_%`.* TO 'reksicherung_restore'@'%';
+```
+
+Run it as root inside the container (wait for the healthcheck first):
+
+```bash
+docker compose --env-file .env --profile mysql exec mysql \
+  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
+# paste the two statements above, then exit
 ```
 
 Seed OpenBao (inside the compose network the host is `mysql`, port `3306`):
@@ -252,6 +264,6 @@ as a **literal** (do not interpolate a Windows host path).
 ## Tear down
 
 ```bash
-docker compose --env-file .env --profile mcp-stdio down
+docker compose --env-file .env --profile mcp-stdio --profile mysql down
 # Add -v only when intentionally wiping OpenBao + SQL data
 ```

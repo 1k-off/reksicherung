@@ -62,7 +62,7 @@ done
    defaults) per `docs/schemas/openbao-source-kv.md`.
 4. Create SQL restore login matching OpenBao `USERNAME`/`PASSWORD` (RUNBOOK §7)
    or use lab `sa` with matching OpenBao password.
-   **MySQL sources only:** set `MYSQL_ROOT_PASSWORD`, `up -d mysql`, create the
+   **MySQL sources only:** set `MYSQL_ROOT_PASSWORD`, `--profile mysql up -d mysql` (opt-in profile), create the
    `reksicherung\_%`-scoped account and seed `I-OPENBAO-MYSQL`
    (`secret/reksicherung/mysql`, RUNBOOK §6b). Skip for SQL Server-only stacks.
 5. Put least-privilege token into `.env` when leaving lab root-token bring-up.

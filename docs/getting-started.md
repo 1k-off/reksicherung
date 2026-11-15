@@ -65,7 +65,8 @@ Reksicherung never creates or removes those containers from restore-check skills
 Follow skill [`reksicherung-bootstrap`](../.agents/skills/reksicherung-bootstrap/SKILL.md)
 and **all** steps in [`examples/compose/RUNBOOK.md`](../examples/compose/RUNBOOK.md)
 (pull GHCR → OpenBao → SQL → reconciler → seed → `chmod 1777`). Do not build images.
-For MySQL sources also follow RUNBOOK §6b (`mysql` service + `secret/reksicherung/mysql`).
+For MySQL sources also follow RUNBOOK §6b (opt-in compose profile `mysql`:
+`--profile mysql up -d mysql` + `secret/reksicherung/mysql`).
 
 ### 2. Register one source
 
@@ -110,7 +111,7 @@ Lab tip: `hold_for_review` keeps the DB so you can inspect it; drop later with
 ### 5. Done when
 
 - [ ] OpenBao unsealed; KV has `sqlserver` (or `mysql` for MySQL sources) + your `sources/<id>`
-- [ ] SQL up; sql-backup volume mode allows uid `65532` writes
+- [ ] SQL Server up (and `mysql` profile service for MySQL sources); sql-backup volume mode allows uid `65532` writes
 - [ ] `validate` + `catalog` succeed
 - [ ] MCP tools reachable
 - [ ] One run reaches restore (or fails with a **real** MCP/storage error — not a guessed PASS)
