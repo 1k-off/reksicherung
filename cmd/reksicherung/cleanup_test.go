@@ -85,6 +85,30 @@ func TestLazyDropperPropagatesBuildError(t *testing.T) {
 	}
 }
 
+func TestLazyDropperRetriesAfterBuildError(t *testing.T) {
+	builds := 0
+	inner := &recordingDropper{}
+	lazy := &lazyDropper{build: func(context.Context) (runregistry.DatabaseDropper, error) {
+		builds++
+		if builds == 1 {
+			return nil, errors.New("transient")
+		}
+		return inner, nil
+	}}
+	if err := lazy.DropDatabase(context.Background(), "a"); err == nil {
+		t.Fatal("first DropDatabase() error = nil, want build error")
+	}
+	if err := lazy.DropDatabase(context.Background(), "b"); err != nil {
+		t.Fatalf("second DropDatabase() error = %v, want success after retry", err)
+	}
+	if err := lazy.DropDatabase(context.Background(), "c"); err != nil {
+		t.Fatal(err)
+	}
+	if builds != 2 || len(inner.ids) != 2 || inner.ids[0] != "b" || inner.ids[1] != "c" {
+		t.Fatalf("builds=%d drops=%v, want 2 builds (success cached) and drops [b c]", builds, inner.ids)
+	}
+}
+
 func TestEngineDropperFromEnvDoesNotRequireUnusedEngineConfig(t *testing.T) {
 	// No env at all: construction must succeed because engines initialize lazily.
 	dropper := newEngineDropperFromEnv(func(string) string { return "" })

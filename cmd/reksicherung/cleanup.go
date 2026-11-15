@@ -97,17 +97,32 @@ func runReconcile(ctx context.Context, args []string, stderr io.Writer) error {
 // engine's configuration.
 type lazyDropper struct {
 	build   func(context.Context) (runregistry.DatabaseDropper, error)
-	once    sync.Once
+	mu      sync.Mutex
 	dropper runregistry.DatabaseDropper
-	err     error
+}
+
+// get returns the cached dropper. Only a successful build is cached; build
+// errors are returned and construction is retried on the next call.
+func (l *lazyDropper) get(ctx context.Context) (runregistry.DatabaseDropper, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.dropper != nil {
+		return l.dropper, nil
+	}
+	dropper, err := l.build(ctx)
+	if err != nil {
+		return nil, err
+	}
+	l.dropper = dropper
+	return dropper, nil
 }
 
 func (l *lazyDropper) DropDatabase(ctx context.Context, runID string) error {
-	l.once.Do(func() { l.dropper, l.err = l.build(ctx) })
-	if l.err != nil {
-		return l.err
+	dropper, err := l.get(ctx)
+	if err != nil {
+		return err
 	}
-	return l.dropper.DropDatabase(ctx, runID)
+	return dropper.DropDatabase(ctx, runID)
 }
 
 // newEngineDropperFromEnv routes drops by Record.DatabaseType (empty means
