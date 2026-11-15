@@ -1,0 +1,23 @@
+project:
+  name: demo-mysql
+  service: app
+mode: simple
+storage:
+  type: s3
+  bucket: demo-backups
+  region: eu-central-1
+  endpoint: https://objects.example.test
+  path_prefix: demo-mysql/prod
+  access_key_id_ref: openbao://secret/reksicherung/sources/demo-mysql#S3_ACCESS_KEY_ID
+  secret_access_key_ref: openbao://secret/reksicherung/sources/demo-mysql#S3_SECRET_ACCESS_KEY
+schedules:
+  cron: "0 5 * * *"
+  keep: 14
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-mysql
+databases:
+  - name: main
+    type: mysql
+    host: mysql.demo.example.test
+    database: AppDB
+    username_ref: openbao://secret/reksicherung/backup-db/demo-mysql#username
+    password_ref: openbao://secret/reksicherung/backup-db/demo-mysql#password

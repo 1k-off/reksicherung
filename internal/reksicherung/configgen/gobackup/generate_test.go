@@ -3,6 +3,7 @@ package gobackup
 import (
 	"bytes"
 	"log"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -91,6 +92,69 @@ databases:
 		"REKSICHERUNG_STORAGE_ACCESS_KEY_ID":     s3AccessRef,
 		"REKSICHERUNG_STORAGE_SECRET_ACCESS_KEY": s3SecretRef,
 	})
+}
+
+func TestGenerateMySQLDefaultsPort(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		portLine string
+		wantPort int
+	}{
+		{name: "omitted port", wantPort: 3306},
+		{name: "explicit port", portLine: "    port: 3307\n", wantPort: 3307},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in, err := input.Decode(strings.NewReader(`project:
+  name: demo-mysql
+storage:
+  type: s3
+  bucket: backups
+schedules:
+  cron: "0 5 * * *"
+  healthcheck_url_ref: ` + healthRef + `
+databases:
+  - name: main
+    type: mysql
+    host: mysql.example.test
+` + test.portLine + `    database: AppDB
+    username_ref: ` + dbUserRef + `
+    password_ref: ` + dbPasswordRef + `
+`))
+			if err != nil {
+				t.Fatalf("Decode() error = %v", err)
+			}
+			result, err := Generate(in)
+			if err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+			model := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "models"), "demo_mysql_default")
+			db := mapAt(t, mapAt(t, model, "databases"), "main")
+			assertEqual(t, db, "type", "mysql")
+			assertEqual(t, db, "port", test.wantPort)
+		})
+	}
+}
+
+func TestGenerateMySQLExample(t *testing.T) {
+	data, err := os.ReadFile("../../../../examples/configgen/gobackup-mysql-s3.yaml")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	in, err := input.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	model := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "models"), "demo_mysql_default")
+	db := mapAt(t, mapAt(t, model, "databases"), "main")
+	assertEqual(t, db, "type", "mysql")
+	assertEqual(t, db, "port", 3306)
+	if _, ok := db["trustServerCertificate"]; ok {
+		t.Errorf("mysql database must not set trustServerCertificate: %#v", db)
+	}
 }
 
 func TestMSSQLCertificateTrustRequiresExplicitOptIn(t *testing.T) {
