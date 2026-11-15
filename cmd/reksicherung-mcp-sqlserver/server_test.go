@@ -194,14 +194,24 @@ func TestMCPRejectsUnknownAndInvalidInputsBeforeServiceCall(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
 				Name: test.tool, Arguments: test.args,
 			})
-			if err == nil {
+			// go-sdk v1.8+ surfaces argument validation failures as tool errors
+			// (IsError) rather than JSON-RPC protocol errors.
+			if err == nil && (result == nil || !result.IsError) {
 				t.Fatal("CallTool() succeeded with invalid input")
 			}
-			if strings.Contains(err.Error(), "customer@example.invalid") {
+			if err != nil && strings.Contains(err.Error(), "customer@example.invalid") {
 				t.Fatalf("CallTool() validation error echoed the supplied row value: %v", err)
+			}
+			if result != nil {
+				for _, content := range result.Content {
+					if text, ok := content.(*mcp.TextContent); ok &&
+						strings.Contains(string(text.Text), "customer@example.invalid") {
+						t.Fatalf("CallTool() tool error echoed the supplied row value: %#v", result.Content)
+					}
+				}
 			}
 		})
 	}
