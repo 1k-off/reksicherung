@@ -37,7 +37,6 @@ var (
 	clientCommandRe     = regexp.MustCompile("(?i)^\\s*(?:\\\\|(?:system|source|connect|tee|pager|edit)(?:\\s|;|$))")
 	delimiterLineRe     = regexp.MustCompile("(?i)^\\s*delimiter\\b")
 	delimiterAllowedRe  = regexp.MustCompile("(?i)^[ \\t]*delimiter[ \\t]+(?:;;|;)[ \\t]*\\r?\\n?$")
-	sqlModeStatementRe  = regexp.MustCompile("^(?:/\\*![0-9]*\\s+)?set\\s+(?:@old_sql_mode\\s*=\\s*@@sql_mode\\s*,\\s*)?(?:session\\s+|@@session\\.)?sql_mode\\s*=\\s*(?:@old_sql_mode|'([a-z_,]*)')\\s*(?:\\*/)?\\s*;$")
 	forbiddenSQLModes   = []string{"ansi", "ansi_quotes", "no_backslash_escapes", "oracle", "db2", "mssql", "postgresql", "maxdb"}
 	forbiddenFirstWords = map[string]bool{
 		"SYSTEM": true, "SOURCE": true, "CONNECT": true, "TEE": true, "PAGER": true, "EDIT": true,
@@ -393,6 +392,11 @@ func (rewriter *DumpRewriter) scanCode(data []byte, i int, final bool) (int, boo
 		if c == '\n' {
 			rewriter.lineBlank = true
 		}
+	case c < ' ' || c == 0x7f:
+		// Control bytes (other than whitespace, handled above) never appear in
+		// dump code; the client and server disagree on how they delimit "--"
+		// comments, so fail closed.
+		rewriter.fail(ErrInvalidDump)
 	case isWordByte(c):
 		rewriter.beginWord(c, wasBlank)
 	case c == '\'' || c == '"':
@@ -415,7 +419,11 @@ func (rewriter *DumpRewriter) scanCode(data []byte, i int, final bool) (int, boo
 		if !final && (remaining < 2 || (data[i+1] == '-' && remaining < 3)) {
 			return i, false
 		}
-		if remaining >= 2 && data[i+1] == '-' && (remaining < 3 || data[i+2] <= ' ') {
+		// The mysql client only starts a "--" comment when a my_isspace byte
+		// follows (the server also accepts other control bytes). Match the
+		// client; control bytes outside strings are rejected below, so the two
+		// can never disagree about where the comment starts.
+		if remaining >= 2 && data[i+1] == '-' && (remaining < 3 || isSpaceByte(data[i+2])) {
 			rewriter.emit(data[i : i+2])
 			rewriter.state = lexLine
 			return i + 2, true
@@ -713,36 +721,13 @@ func (rewriter *DumpRewriter) finishStatement() {
 			rewritten = "USE " + quoteIdentifier(rewriter.target) + ";"
 		}
 	default:
-		err = checkSetStatement(text)
-		rewritten = text
+		rewritten, err = rewriteSetStatement(text)
 	}
 	if err != nil {
 		rewriter.fail(err)
 		return
 	}
 	rewriter.out = append(rewriter.out, rewritten...)
-}
-
-// checkSetStatement rejects SET statements that could change sql_mode in a
-// way that would desynchronise this lexer from the server and client
-// (ANSI_QUOTES, NO_BACKSLASH_ESCAPES, and the combination modes).
-func checkSetStatement(text string) error {
-	lower := strings.ToLower(text)
-	if !strings.Contains(lower, "sql_mode") {
-		return nil
-	}
-	match := sqlModeStatementRe.FindStringSubmatch(lower)
-	if match == nil {
-		return ErrInvalidDump
-	}
-	for _, mode := range strings.Split(match[1], ",") {
-		for _, forbidden := range forbiddenSQLModes {
-			if mode == forbidden {
-				return ErrInvalidDump
-			}
-		}
-	}
-	return nil
 }
 
 // finish flushes lexer state at end of input.

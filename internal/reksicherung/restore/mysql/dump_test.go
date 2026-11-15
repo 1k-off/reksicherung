@@ -210,6 +210,203 @@ func TestRewriteBypassShapesAcceptedForms(t *testing.T) {
 	}
 }
 
+func TestRewriteSetStatementsFailClosed(t *testing.T) {
+	tests := map[string]string{
+		// Other-database qualifiers / unknown targets.
+		"set qualified sysvar":       "SET other.x = 1;\n",
+		"set qualified rhs":          "SET @a = other.t;\n",
+		"set select subquery":        "SET @a = (SELECT 1 FROM `other`.`t`);\n",
+		"set backtick":               "SET @a = `other`.`t`;\n",
+		"set unknown variable":       "SET foo = 1;\n",
+		"set global":                 "SET GLOBAL sql_mode = '';\n",
+		"set global sysvar":          "SET @@GLOBAL.sql_mode = '';\n",
+		"set persist":                "SET PERSIST max_allowed_packet = 1;\n",
+		"set password":               "SET PASSWORD = 'x';\n",
+		"set gtid purged":            "SET @@GLOBAL.GTID_PURGED='abc:1';\n",
+		"set comment inside":         "SET /* c */ @a = 1;\n",
+		"set conditional inside":     "SET /*!40101 NAMES gbk */;\n",
+		"set double wrapper":         "/*!40101 SET NAMES utf8 */ /*!40101 SET NAMES gbk */;\n",
+		"set mariadb wrapper":        "/*M!100100 SET NAMES gbk */;\n",
+		"set hash comment":           "SET @a = 1 # x\n;\n",
+		"set double quoted":          "SET @a = \"x\";\n",
+		"set expression":             "SET @a = 1 + 1;\n",
+		"set subselect user var":     "SET @a = @b, @c = other.d;\n",
+		"set trailing empty item":    "SET @a = 1,;\n",
+		"set backslash string":       "SET @a = 'x\\';\n",
+		"saved mode from literal":    "SET @saved_sql_mode = 'ANSI_QUOTES';\n",
+		"sysvar rhs not allowlisted": "SET @a = @@GLOBAL.sql_mode;\n",
+		// Charset desync.
+		"names gbk":                "SET NAMES gbk;\n",
+		"names sjis":               "SET NAMES 'sjis';\n",
+		"names big5 collate":       "SET NAMES big5 COLLATE big5_chinese_ci;\n",
+		"names allowed bad collat": "SET NAMES utf8mb4 COLLATE gbk_chinese_ci;\n",
+		"names default":            "SET NAMES DEFAULT;\n",
+		"names conditional gbk":    "/*!40101 SET NAMES gbk */;\n",
+		"names versioned gbk":      "/*!50503 SET NAMES gbk */;\n",
+		"names later in list":      "SET @a = 1, NAMES gbk;\n",
+		"character set gbk":        "SET CHARACTER SET gbk;\n",
+		"charset gbk":              "SET CHARSET gbk;\n",
+		"character set cond":       "/*!40101 SET CHARACTER SET cp932 */;\n",
+		"client gbk":               "SET character_set_client = gbk;\n",
+		"client session gbk":       "SET SESSION character_set_client = 'gbk';\n",
+		"client at at gbk":         "SET @@character_set_client = gbk;\n",
+		"client cond gbk":          "/*!40101 SET character_set_client = gbk */;\n",
+		"connection gbk":           "SET character_set_connection = sjis;\n",
+		"connection session gbk":   "SET @@session.character_set_connection = gb18030;\n",
+		"results gbk":              "SET character_set_results = gbk;\n",
+		"collation connection gbk": "SET collation_connection = gbk_chinese_ci;\n",
+		"collation cond gbk":       "/*!40101 SET collation_connection = 'sjis_bin' */;\n",
+		"charset uppercase gbk":    "SET NAMES GBK;\n",
+		"charset hex":              "SET character_set_client = 0x67626b;\n",
+	}
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := RewriteDump(strings.NewReader(in), "app", "reksicherung_abc"); !errors.Is(err, ErrInvalidDump) {
+				t.Fatalf("err=%v, want ErrInvalidDump", err)
+			}
+		})
+	}
+}
+
+func TestRewriteSetStatementsAcceptedForms(t *testing.T) {
+	passthrough := []string{
+		"SET NAMES utf8mb4;\n",
+		"SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;\n",
+		"SET names 'latin1';\n",
+		"SET NAMES binary;\n",
+		"SET NAMES ascii;\n",
+		"SET NAMES utf8;\n",
+		"SET NAMES utf8mb3;\n",
+		"SET CHARACTER SET utf8mb4;\n",
+		"/*!40101 SET NAMES utf8mb4 */;\n",
+		"/*!50503 SET NAMES utf8mb4 */;\n",
+		"/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n",
+		"/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;\n",
+		"/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;\n",
+		"/*!40101 SET @saved_cs_client     = @@character_set_client */;\n",
+		"/*!50503 SET character_set_client = utf8mb4 */;\n",
+		"/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;\n",
+		"/*!40103 SET TIME_ZONE='+00:00' */;\n",
+		"/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;\n",
+		"/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;\n",
+		"/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;\n",
+		"/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\n",
+		"/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;\n",
+		"/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;\n",
+		"/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;\n",
+		"SET @@SESSION.SQL_LOG_BIN= 0;\n",
+		"SET autocommit=0;\n",
+		"SET sql_mode = 'ONLY_FULL_GROUP_BY,STRICT_TRANS_TABLES,NO_ENGINE_SUBSTITUTION';\n",
+		"SET @@session.sql_mode='NO_ENGINE_SUBSTITUTION';\n",
+		"SET SQL_MODE=@OLD_SQL_MODE;\n",
+	}
+	for _, in := range passthrough {
+		t.Run(strings.TrimSpace(in), func(t *testing.T) {
+			out, err := RewriteDump(strings.NewReader(in), "app", "reksicherung_abc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := mustRead(t, out); got != in {
+				t.Fatalf("got %q, want %q", got, in)
+			}
+		})
+	}
+	rewritten := []struct{ name, in, want string }{
+		{"restore client charset", "/*!40101 SET character_set_client = @saved_cs_client */;\n",
+			"/*!40101 SET @reksicherung_noop=0 */;\n"},
+		{"restore old client", "/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;\n",
+			"/*!40101 SET @reksicherung_noop=0 */;\n"},
+		{"restore old results", "/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;\n",
+			"/*!40101 SET @reksicherung_noop=0 */;\n"},
+		{"restore old collation", "/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;\n",
+			"/*!40101 SET @reksicherung_noop=0 */;\n"},
+		{"restore plain", "SET character_set_connection = @x;\n", "SET @reksicherung_noop=0;\n"},
+		{"restore in list", "SET @a = 1, character_set_client = @a;\n", "SET @a = 1, @reksicherung_noop=0;\n"},
+	}
+	for _, test := range rewritten {
+		t.Run(test.name, func(t *testing.T) {
+			out, err := RewriteDump(strings.NewReader(test.in), "app", "reksicherung_abc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := mustRead(t, out); got != test.want {
+				t.Fatalf("got %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRewriteSetAtEOFWithoutSemicolon(t *testing.T) {
+	if _, err := RewriteDump(strings.NewReader("SET NAMES gbk"), "app", "reksicherung_abc"); !errors.Is(err, ErrInvalidDump) {
+		t.Fatalf("err=%v, want ErrInvalidDump", err)
+	}
+	out, err := RewriteDump(strings.NewReader("SET NAMES utf8mb4"), "app", "reksicherung_abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustRead(t, out); got != "SET NAMES utf8mb4" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestRewriteControlByteCommentDesyncFailsClosed(t *testing.T) {
+	tests := map[string]string{
+		// Server treats "--" + control byte as a comment, the client does not.
+		"dashdash soh then use":   "SELECT 1; --\x01\nUSE `other`;\n",
+		"dashdash soh semicolon":  "SELECT 1 --\x01 ; USE `other`;\n",
+		"dashdash nul":            "SELECT 1; --\x00 ; USE `other`;\n",
+		"dashdash del":            "SELECT 1; --\x7f ; USE `other`;\n",
+		"dashdash escape":         "SELECT 1; --\x1b; USE `other`;\n",
+		"control in code":         "SELECT\x01 1;\n",
+		"nul in code":             "SELECT 1\x00;\n",
+		"del in code":             "SELECT 1\x7f;\n",
+		"control after statement": "SELECT 1;\x02USE `other`;\n",
+		"dashdash eof control":    "SELECT 1 --\x01",
+	}
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			if _, err := RewriteDump(strings.NewReader(in), "app", "reksicherung_abc"); !errors.Is(err, ErrInvalidDump) {
+				t.Fatalf("err=%v, want ErrInvalidDump", err)
+			}
+		})
+	}
+}
+
+func TestRewriteControlBytesAllowedInsideStringsAndComments(t *testing.T) {
+	tests := []string{
+		"INSERT INTO t VALUES ('a\x00b\x01c\x7f');\n",
+		"-- comment \x01 with control\nSELECT 1;\n",
+		"-- \x01\nSELECT 1;\n",
+		"# \x01 hash\nSELECT 1;\n",
+		"/* \x01 */ SELECT 1;\n",
+		"SELECT 1; --\tcomment;\nSELECT 2;\n",
+		"SELECT 1; --\r\nSELECT 2;\n",
+		"SELECT 1;\n--\n",
+		"SELECT 1;\n--",
+	}
+	for _, in := range tests {
+		t.Run(strings.TrimSpace(in), func(t *testing.T) {
+			out, err := RewriteDump(strings.NewReader(in), "app", "reksicherung_abc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := mustRead(t, out); got != in {
+				t.Fatalf("got %q, want %q", got, in)
+			}
+		})
+	}
+}
+
+func TestRewriteDashDashControlAcrossChunkBoundary(t *testing.T) {
+	// "--" followed by a control byte right at the read-buffer boundary.
+	head := "INSERT INTO t VALUES (1); "
+	prefix := head + strings.Repeat(" ", dumpReadBufferBytes-len(head)-2)
+	in := prefix + "--\x01 ; USE `other`;\n"
+	if _, err := RewriteDump(strings.NewReader(in), "app", "reksicherung_abc"); !errors.Is(err, ErrInvalidDump) {
+		t.Fatalf("err=%v, want ErrInvalidDump", err)
+	}
+}
+
 func TestRewriteLongInsertLineMultiStatementFailsClosed(t *testing.T) {
 	long := "INSERT INTO `t` VALUES (" + strings.Repeat("'a',", 40000) + "1); USE `other`;\n"
 	if _, err := RewriteDump(strings.NewReader(long), "app", "reksicherung_abc"); !errors.Is(err, ErrInvalidDump) {

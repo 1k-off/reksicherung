@@ -50,10 +50,21 @@ Optional:
 Passwords are written only to a `0600` `--defaults-extra-file` that is removed
 after each command; they never appear in argv, environment, or MCP responses.
 Commands use argv (no shell), cap output, and sanitize errors. The client runs
-with `--binary-mode --local-infile=0`. The rewriter lexes the dump (strings,
-identifiers, comments, statement boundaries) and fails closed on `USE`/database
-statements it cannot rewrite, cross-database qualifiers (`other`.`t`, `other.t`;
-table-qualified `t`.`c` is also rejected), `PREPARE`/`EXECUTE`, client
-commands, and `sql_mode` changes that could desynchronise it. It is not a full
-SQL parser; treat the target server as disposable. No live MySQL integration test is implied by the
-unit tests. Staged source artifacts are retained and never deleted by this MCP.
+with `--binary-mode --local-infile=0 --default-character-set=utf8mb4`. The
+rewriter lexes the dump (strings, identifiers, comments, statement boundaries)
+and fails closed on `USE`/database statements it cannot rewrite, cross-database
+qualifiers (`other`.`t`, `other.t`; table-qualified `t`.`c` is also rejected),
+`PREPARE`/`EXECUTE`, client commands, control bytes outside strings and
+comments, and any `SET` that is not one of the forms mysqldump emits (a small
+allowlist of session variables; `GLOBAL`, comments and expressions are rejected).
+`sql_mode` values that change quoting (`ANSI_QUOTES`, `NO_BACKSLASH_ESCAPES`,
+...) and charsets outside `utf8`, `utf8mb3`, `utf8mb4`, `latin1`, `binary`,
+`ascii` (`SET NAMES`, `CHARACTER SET`, `character_set_client|connection`,
+`collation_connection`) are rejected. Restores of `character_set_*` from saved
+user variables are replaced by a no-op assignment. Dump with
+`--set-gtid-purged=OFF`; `SET @@GLOBAL.GTID_PURGED` is rejected, as are `SET`
+statements inside multi-statement routine bodies. It is not a full SQL parser,
+so the lexer is defence in depth, not a sandbox: treat the target server as
+disposable and keep the MySQL account limited to `reksicherung\_%` databases
+(no `FILE`, `SUPER`, or access to other schemas). No live MySQL integration test
+is implied by the unit tests. Staged source artifacts are retained and never deleted by this MCP.
