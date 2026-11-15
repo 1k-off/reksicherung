@@ -12,12 +12,12 @@ service for semantic review of a database restored by
 - `mysql_describe_table`: at most 200 columns of a table from
   `information_schema`.
 - `mysql_validate_table`: count rows, capped at 100. Predicates are not
-  accepted; only the count and a truncation flag are returned.
+  accepted (same as SQL Server inspection); only the count and a truncation flag
+  are returned.
 - `mysql_check_integrity`: fixed default-option `CHECK TABLE` over the base
-  tables (up to 200) with a 15-minute timeout. Returns `command_completed`,
-  `tables_checked`, and `truncated`. **Completion is not a clean verdict:**
+  tables (up to 200) with a 15-minute timeout. Returns `command_completed` only. **Completion is not a clean verdict:**
   `CHECK TABLE` problem rows are discarded, and `command_completed` is false
-  when tables were skipped due to the cap.
+  when tables were skipped due to the cap (no extra detail is exposed).
 
 Every tool accepts an optional `run_id`; the server derives the run-scoped
 database `reksicherung_<32 hex>` exactly as the restore MCP does. `schema` is

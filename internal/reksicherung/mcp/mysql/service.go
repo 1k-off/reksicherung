@@ -118,12 +118,10 @@ type ValidationResult struct {
 // completed without a command error for every table. It does not interpret or
 // reproduce CHECK TABLE's per-table diagnostic rows, so CommandCompleted does
 // not mean the database is free of corruption. When the table inventory is
-// larger than the configured cap, only TablesChecked tables are checked,
-// Truncated is true, and CommandCompleted is false.
+// larger than the configured cap, some tables are not checked and
+// CommandCompleted is false; no further detail is exposed (SQL Server parity).
 type IntegrityResult struct {
 	CommandCompleted bool
-	TablesChecked    int
-	Truncated        bool
 }
 
 type rows interface {
@@ -400,7 +398,6 @@ func (s *Service) CheckIntegrity(ctx context.Context) (IntegrityResult, error) {
 	if err != nil {
 		return IntegrityResult{}, classifyIntegrityError(ctx, err)
 	}
-	checked := 0
 	for _, table := range list.Tables {
 		quotedTable, err := quoteIdentifier(table.Name)
 		if err != nil {
@@ -421,13 +418,8 @@ func (s *Service) CheckIntegrity(ctx context.Context) (IntegrityResult, error) {
 		if closeErr != nil {
 			return IntegrityResult{}, classifyIntegrityError(ctx, closeErr)
 		}
-		checked++
 	}
-	return IntegrityResult{
-		CommandCompleted: !list.Truncated,
-		TablesChecked:    checked,
-		Truncated:        list.Truncated,
-	}, nil
+	return IntegrityResult{CommandCompleted: !list.Truncated}, nil
 }
 
 // checkRef validates a table reference against the service target.

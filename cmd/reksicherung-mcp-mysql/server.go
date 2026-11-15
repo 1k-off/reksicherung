@@ -115,9 +115,7 @@ type validateTableOutput struct {
 }
 
 type checkIntegrityOutput struct {
-	CommandCompleted bool `json:"command_completed" jsonschema:"True when CHECK TABLE commands completed without a command error for every table. This is completion only, not a clean-integrity verdict."`
-	TablesChecked    int  `json:"tables_checked" jsonschema:"Number of tables CHECK TABLE was run against."`
-	Truncated        bool `json:"truncated" jsonschema:"True when the table inventory exceeded the cap and some tables were not checked; command_completed is then false."`
+	CommandCompleted bool `json:"command_completed" jsonschema:"True when CHECK TABLE commands completed without a command error for every table (false if the table cap left tables unchecked). This is completion only, not a clean-integrity verdict."`
 }
 
 func resolveInspectDatabase(defaultDatabase string, runID *string) (string, error) {
@@ -256,11 +254,7 @@ func newMCPServer(service inspectionService, database string) *mcp.Server {
 		if err != nil {
 			return nil, checkIntegrityOutput{}, safeToolError(err)
 		}
-		return nil, checkIntegrityOutput{
-			CommandCompleted: result.CommandCompleted,
-			TablesChecked:    result.TablesChecked,
-			Truncated:        result.Truncated,
-		}, nil
+		return nil, checkIntegrityOutput{CommandCompleted: result.CommandCompleted}, nil
 	})
 
 	return server

@@ -79,7 +79,7 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 			Truncated: false,
 		},
 		validation: mysqlsvc.ValidationResult{ObservedRows: 2, Limit: 2, Truncated: true},
-		integrity:  mysqlsvc.IntegrityResult{CommandCompleted: true, TablesChecked: 3},
+		integrity:  mysqlsvc.IntegrityResult{CommandCompleted: true},
 	}
 	client, closeSessions := connectMCPTestClient(t, fake, "RestoredDb")
 	defer closeSessions()
@@ -144,7 +144,7 @@ func TestMCPToolRegistrationAndBoundedSemantics(t *testing.T) {
 	integrityResult := callTool(t, client, "mysql_check_integrity", map[string]any{})
 	var integrity checkIntegrityOutput
 	decodeStructuredResult(t, integrityResult, &integrity)
-	if integrity != (checkIntegrityOutput{CommandCompleted: true, TablesChecked: 3}) || fake.integrityCalls != 1 {
+	if integrity != (checkIntegrityOutput{CommandCompleted: true}) || fake.integrityCalls != 1 {
 		t.Fatalf("integrity output = %#v, fake calls = %d", integrity, fake.integrityCalls)
 	}
 
@@ -379,18 +379,21 @@ func TestRunIDSelectsRunScopedDatabaseAndRejectsInvalidRunID(t *testing.T) {
 	}
 }
 
-func TestIntegrityOutputNeverClaimsCleanAndReportsTruncation(t *testing.T) {
-	fake := &fakeInspectionService{integrity: mysqlsvc.IntegrityResult{TablesChecked: 2, Truncated: true}}
+func TestIntegrityOutputNeverClaimsCleanAndExposesOnlyCompletion(t *testing.T) {
+	fake := &fakeInspectionService{integrity: mysqlsvc.IntegrityResult{CommandCompleted: false}}
 	client, closeSessions := connectMCPTestClient(t, fake, "RestoredDb")
 	defer closeSessions()
 
 	result := callTool(t, client, "mysql_check_integrity", map[string]any{})
 	var out checkIntegrityOutput
 	decodeStructuredResult(t, result, &out)
-	if out != (checkIntegrityOutput{CommandCompleted: false, TablesChecked: 2, Truncated: true}) {
+	if out != (checkIntegrityOutput{CommandCompleted: false}) {
 		t.Fatalf("integrity output = %#v", out)
 	}
 	encoded, _ := json.Marshal(result.StructuredContent)
+	if string(encoded) != `{"command_completed":false}` {
+		t.Fatalf("integrity structured output = %s, want only command_completed", encoded)
+	}
 	for _, forbidden := range []string{"clean", "healthy", "ok\"", "corrupt"} {
 		if strings.Contains(strings.ToLower(string(encoded)), forbidden) {
 			t.Errorf("integrity output contains %q: %s", forbidden, encoded)
