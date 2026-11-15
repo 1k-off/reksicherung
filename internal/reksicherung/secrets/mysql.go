@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 )
@@ -37,7 +38,8 @@ func (m *MySQLMaterial) Clear() {
 }
 
 // DSN builds a go-sql-driver/mysql DSN (user:pass@tcp(host:port)/dbname) for
-// the given database name.
+// the given database name. The name is URL path-escaped because go-sql-driver
+// path-unescapes the dbname segment when parsing.
 func (m MySQLMaterial) DSN(database string) (string, error) {
 	if strings.TrimSpace(database) == "" || strings.TrimSpace(database) != database ||
 		strings.ContainsAny(database, "/?\x00\r\n") {
@@ -51,7 +53,7 @@ func (m MySQLMaterial) DSN(database string) (string, error) {
 	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
 		host = "[" + host + "]"
 	}
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", m.Username, m.Password, host, m.Port, database), nil
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", m.Username, m.Password, host, m.Port, url.PathEscape(database)), nil
 }
 
 // ResolveMySQL loads HOST/PORT/USERNAME/PASSWORD from

@@ -3,6 +3,8 @@ package secrets
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -89,5 +91,32 @@ func TestMySQLDSNRejectsUnsafeInput(t *testing.T) {
 	bad := MySQLMaterial{Host: "mysql", Port: 3306, Username: "a:b", Password: []byte("password1")}
 	if _, err := bad.DSN("db"); !errors.Is(err, ErrIncompleteMySQL) {
 		t.Errorf("DSN with colon username error = %v", err)
+	}
+}
+
+func TestMySQLDSNEscapesDatabaseName(t *testing.T) {
+	m := MySQLMaterial{Host: "mysql", Port: 3306, Username: "restore", Password: []byte("password1")}
+	tests := []struct {
+		database string
+		wantPath string
+	}{
+		{"db%41", "db%2541"},
+		{"my db", "my%20db"},
+		{"db#1", "db%231"},
+		{"a%b c#d", "a%25b%20c%23d"},
+	}
+	for _, tt := range tests {
+		dsn, err := m.DSN(tt.database)
+		if err != nil {
+			t.Fatalf("DSN(%q) error = %v", tt.database, err)
+		}
+		want := "restore:password1@tcp(mysql:3306)/" + tt.wantPath
+		if dsn != want {
+			t.Errorf("DSN(%q) = %q, want %q", tt.database, dsn, want)
+		}
+		got, err := url.PathUnescape(strings.TrimPrefix(dsn, "restore:password1@tcp(mysql:3306)/"))
+		if err != nil || got != tt.database {
+			t.Errorf("PathUnescape(DSN(%q)) = %q, %v; want round-trip", tt.database, got, err)
+		}
 	}
 }
