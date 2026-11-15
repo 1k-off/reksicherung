@@ -45,4 +45,4 @@ mcp_servers:
       REKSICHERUNG_SQLSERVER_DATABASE: ${REKSICHERUNG_SQLSERVER_DATABASE}
 
 skills:
-  - path: skills/reksicherung-restore-check/SKILL.md
+  - path: .agents/skills/reksicherung-restore-check/SKILL.md

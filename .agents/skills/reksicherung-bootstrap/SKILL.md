@@ -20,14 +20,14 @@ mcr.microsoft.com/mssql/server:2022-latest
 ```
 
 **Prefer copy-paste commands in**
-[`examples/compose/RUNBOOK.md`](../../examples/compose/RUNBOOK.md)
+[`examples/compose/RUNBOOK.md`](../../../examples/compose/RUNBOOK.md)
 (Init / Unseal / KV / SQL seed / chmod). Do not invent OpenBao steps.
 
 Do **not** run `docker compose build` for operator bootstrap. Building from
 `deploy/docker/` is **developers only** (see below).
 
-Humans without Airon: also [`docs/getting-started.md`](../../docs/getting-started.md) ·
-[`docs/mcp-clients.md`](../../docs/mcp-clients.md).  
+Humans without Airon: also [`docs/getting-started.md`](../../../docs/getting-started.md) ·
+[`docs/mcp-clients.md`](../../../docs/mcp-clients.md).  
 Airon lab pack: `reksicherung-airon-onboard` (same GHCR images, Airon job layout).
 
 ## Inputs
@@ -53,7 +53,7 @@ for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect cli
 done
 ```
 
-3. Follow [`examples/compose/RUNBOOK.md`](../../examples/compose/RUNBOOK.md):
+3. Follow [`examples/compose/RUNBOOK.md`](../../../examples/compose/RUNBOOK.md):
    start OpenBao → init/unseal → enable KV v2 → start SQL + reconciler →
    `chmod 1777` on `reksicherung_sql-backup` → seed `I-OPENBAO-SQL` (+ optional
    defaults) per `docs/schemas/openbao-source-kv.md`.
@@ -69,7 +69,7 @@ docker run --rm -v "$PWD:/work:ro" \
   validate -config /work/path/to/catalog.yaml
 ```
 
-7. Attach MCP via [`docs/mcp-clients.md`](../../docs/mcp-clients.md) (GHCR
+7. Attach MCP via [`docs/mcp-clients.md`](../../../docs/mcp-clients.md) (GHCR
    `docker run --rm -i`) and/or optional orchestrator job (`I-ORCHESTRATOR-JOB`).
 8. Do not enable schedules until a dry-run via `reksicherung-restore-check`.
 

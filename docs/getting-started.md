@@ -4,14 +4,14 @@ Goal: one successful restore-check (`PASS`, `FAIL`, or documented `INCONCLUSIVE`
 from real MCP errors) **without reading Go source**.
 
 Glossary: [`glossary.md`](glossary.md) · Inputs: [`inputs.md`](inputs.md) ·
-AI skill map: [`skills/reksicherung-index/SKILL.md`](../skills/reksicherung-index/SKILL.md)
+AI skill map: [`.agents/skills/reksicherung-index/SKILL.md`](../.agents/skills/reksicherung-index/SKILL.md)
 
 ## Choose a path
 
 | Path | Use when | Start here |
 | --- | --- | --- |
-| **A. Lab / GHCR + any MCP host** | Pull published images; Cursor/Claude/other stdio (no Airon) | This page → skill [`reksicherung-bootstrap`](../skills/reksicherung-bootstrap/SKILL.md) → [RUNBOOK](../examples/compose/RUNBOOK.md) → [mcp-clients](mcp-clients.md) |
-| **B. Airon pack** | Client/lab already uses Airon + LLM | Skill [`reksicherung-airon-onboard`](../skills/reksicherung-airon-onboard/SKILL.md) |
+| **A. Lab / GHCR + any MCP host** | Pull published images; Cursor/Claude/other stdio (no Airon) | This page → skill [`reksicherung-bootstrap`](../.agents/skills/reksicherung-bootstrap/SKILL.md) → [RUNBOOK](../examples/compose/RUNBOOK.md) → [mcp-clients](mcp-clients.md) |
+| **B. Airon pack** | Client/lab already uses Airon + LLM | Skill [`reksicherung-airon-onboard`](../.agents/skills/reksicherung-airon-onboard/SKILL.md) |
 | **Developers only** | Changing this repo’s images/code | Bootstrap skill section “Developers only — build from source” |
 
 Paths A and B both use **GHCR** (`latest` or a pinned tag). Do not `compose build` for operator bring-up.
@@ -22,7 +22,7 @@ Paths A and B both use **GHCR** (`latest` or a pinned tag). Do not `compose buil
 2. **Storage:** S3-compatible or Azure? (`STORAGE_TYPE` required)
 3. **Already have backups in object storage?**  
    - Yes → skip configgen; go to catalog + OpenBao source.  
-   - No → optional [`reksicherung-configgen`](../skills/reksicherung-configgen/SKILL.md), then deploy YAML on the backup host, then register the source.
+   - No → optional [`reksicherung-configgen`](../.agents/skills/reksicherung-configgen/SKILL.md), then deploy YAML on the backup host, then register the source.
 4. **Orchestrator:** Airon (path B) / other MCP host (path A) / manual tool calls (path A)?
 5. **OS + container runtime:** Docker, Podman, or nerdctl?
 
@@ -61,7 +61,7 @@ Reksicherung never creates or removes those containers from restore-check skills
 
 ### 1. Bring up OpenBao + SQL
 
-Follow skill [`reksicherung-bootstrap`](../skills/reksicherung-bootstrap/SKILL.md)
+Follow skill [`reksicherung-bootstrap`](../.agents/skills/reksicherung-bootstrap/SKILL.md)
 and **all** steps in [`examples/compose/RUNBOOK.md`](../examples/compose/RUNBOOK.md)
 (pull GHCR → OpenBao → SQL → reconciler → seed → `chmod 1777`). Do not build images.
 
@@ -81,7 +81,7 @@ go run ./cmd/reksicherung catalog -config path/to/catalog.yaml > inventory.json
 
 Or use the GHCR `cli` image (see RUNBOOK §9).
 
-Skill form of this step: [`reksicherung-add-source`](../skills/reksicherung-add-source/SKILL.md).
+Skill form of this step: [`reksicherung-add-source`](../.agents/skills/reksicherung-add-source/SKILL.md).
 
 ### 3. Attach MCP servers
 
@@ -90,7 +90,7 @@ Configure your host with [`mcp-clients.md`](mcp-clients.md). Confirm tools list
 
 ### 4. Run one restore-check
 
-Use skill [`reksicherung-restore-check`](../skills/reksicherung-restore-check/SKILL.md)
+Use skill [`reksicherung-restore-check`](../.agents/skills/reksicherung-restore-check/SKILL.md)
 or the tool sequence in mcp-clients.
 
 Minimal prompt slots ([`schemas/restore-check-prompt.md`](schemas/restore-check-prompt.md)):
@@ -103,7 +103,7 @@ cleanup=hold_for_review
 ```
 
 Lab tip: `hold_for_review` keeps the DB so you can inspect it; drop later with
-`reksicherung cleanup` ([`reksicherung-operate`](../skills/reksicherung-operate/SKILL.md)).
+`reksicherung cleanup` ([`reksicherung-operate`](../.agents/skills/reksicherung-operate/SKILL.md)).
 
 ### 5. Done when
 
@@ -116,7 +116,7 @@ Lab tip: `hold_for_review` keeps the DB so you can inspect it; drop later with
 
 ### 6. Only after a good dry-run
 
-Recurring coverage: [`reksicherung-schedule-verify`](../skills/reksicherung-schedule-verify/SKILL.md).  
+Recurring coverage: [`reksicherung-schedule-verify`](../.agents/skills/reksicherung-schedule-verify/SKILL.md).  
 Day-2 ops: [`operations.md`](operations.md).
 
 ## Optional: generate backup YAML
@@ -124,7 +124,7 @@ Day-2 ops: [`operations.md`](operations.md).
 Only if you need new GoBackup/resticprofile configs:
 
 1. Copy a template from [`examples/configgen/`](../examples/configgen/) (see its README for which file)
-2. Skill [`reksicherung-configgen`](../skills/reksicherung-configgen/SKILL.md) — render with `reksicherung configgen`
+2. Skill [`reksicherung-configgen`](../.agents/skills/reksicherung-configgen/SKILL.md) — render with `reksicherung configgen`
 3. Deploy generated files to the backup host (operator-owned)
 4. Continue at “Register one source”
 
@@ -151,4 +151,4 @@ in this repo; lab first-run uses a backup you already control in object storage.
 | MCP without Airon | [`mcp-clients.md`](mcp-clients.md) |
 | Production checklist | [`operations.md`](operations.md) |
 | Evidence | [`evidence.md`](evidence.md) |
-| Airon lab | [`reksicherung-airon-onboard`](../skills/reksicherung-airon-onboard/SKILL.md) |
+| Airon lab | [`reksicherung-airon-onboard`](../.agents/skills/reksicherung-airon-onboard/SKILL.md) |

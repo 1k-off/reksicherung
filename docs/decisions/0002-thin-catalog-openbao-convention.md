@@ -32,5 +32,5 @@
 ## Consequences
 
 - Many databases / ACL key pairs no longer need compose `.env` edits.
-- Agents can add sources via `skills/reksicherung-add-source` using schemas only.
+- Agents can add sources via `.agents/skills/reksicherung-add-source` using schemas only.
 - Operators must provision OpenBao KV before the first restore-check run.

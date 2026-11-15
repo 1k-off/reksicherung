@@ -118,7 +118,7 @@ directories must still exist on paths the restore target can see — see
 
 ## Tool sequence (one source)
 
-Follow skill [`skills/reksicherung-restore-check/SKILL.md`](../skills/reksicherung-restore-check/SKILL.md).
+Follow skill [`.agents/skills/reksicherung-restore-check/SKILL.md`](../.agents/skills/reksicherung-restore-check/SKILL.md).
 Summary for a GoBackup `latest` source:
 
 1. `gobackup_latest` / `gobackup_list` with `source_id`
@@ -144,7 +144,7 @@ Prompt slots: [`schemas/restore-check-prompt.md`](schemas/restore-check-prompt.m
 | Inspect sees `master` only | Pass restore `run_id` into inspect tools |
 
 More Windows/Podman notes (also apply without Airon):
-[`skills/reksicherung-airon-onboard/reference-pitfalls.md`](../skills/reksicherung-airon-onboard/reference-pitfalls.md).
+[`.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md`](../.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md).
 
 ## Airon
 

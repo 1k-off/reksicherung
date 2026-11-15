@@ -1,7 +1,7 @@
 # Run context and cleanup
 
 Drive Reksicherung through its MCP tools and the
-`skills/reksicherung-restore-check` skill (manually, via Airon, or any other
+`.agents/skills/reksicherung-restore-check` skill (manually, via Airon, or any other
 orchestrator). Cleanup is database-scoped:
 
 - Normal mode: call `sqlserver_drop_restore_database` for the same `run_id`.

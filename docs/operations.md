@@ -3,7 +3,7 @@
 ## Production readiness checklist
 
 1. Complete a lab dry-run via `docs/getting-started.md` (or Airon onboard), then
-   harden with `docs/inputs.md` and `skills/reksicherung-bootstrap/SKILL.md`.
+   harden with `docs/inputs.md` and `.agents/skills/reksicherung-bootstrap/SKILL.md`.
    Compose commands: `examples/compose/RUNBOOK.md`.
 2. Pull or promote MCP/CLI images from GHCR with pinned digests. Build from
    `deploy/docker/` only when developing this repository.

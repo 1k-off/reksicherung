@@ -1,5 +1,5 @@
 # Operator stack: pull published images (default). Do not build unless developing.
-#   See examples/compose/RUNBOOK.md and skills/reksicherung-bootstrap/SKILL.md
+#   See examples/compose/RUNBOOK.md and .agents/skills/reksicherung-bootstrap/SKILL.md
 # Optional tag: REKSICHERUNG_IMAGE_TAG in .env (default latest).
 # Developers only:
 #   REKSICHERUNG_IMAGE_TAG=local docker compose -f examples/compose/docker-compose.yml build

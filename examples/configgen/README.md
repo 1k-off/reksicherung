@@ -4,7 +4,7 @@ Fictional OpenBao refs and hostnames only. Copy a file, replace refs/paths with
 your project values, then render.
 
 Schema: [`docs/schemas/configgen-input.schema.json`](../../docs/schemas/configgen-input.schema.json)  
-Skill: [`skills/reksicherung-configgen/SKILL.md`](../../skills/reksicherung-configgen/SKILL.md)  
+Skill: [`.agents/skills/reksicherung-configgen/SKILL.md`](../../.agents/skills/reksicherung-configgen/SKILL.md)  
 Skip this folder if backups already exist — go to
 [`docs/getting-started.md`](../../docs/getting-started.md).
 
@@ -56,7 +56,7 @@ secrets. Wire `bindings.json` env names to OpenBao at runtime on the backup host
 1. Deploy provider YAML to the backup host (operator-owned).
 2. Ensure every `openbao://…#key` in the input exists in OpenBao.
 3. Register the same storage for restore-check:
-   [`reksicherung-add-source`](../../skills/reksicherung-add-source/SKILL.md)
+   [`reksicherung-add-source`](../../.agents/skills/reksicherung-add-source/SKILL.md)
    (catalog `source_id` + `secret/reksicherung/sources/<id>` with `STORAGE_TYPE`).
 
 For restic catalog entries, set `backupPath` to the same absolute `.bak` path

@@ -2,7 +2,7 @@
 
 **Operators:** pull GHCR images and follow
 [`RUNBOOK.md`](RUNBOOK.md) (OpenBao init/unseal, SQL seed, volume chmod).
-Skill: [`reksicherung-bootstrap`](../../skills/reksicherung-bootstrap/SKILL.md).
+Skill: [`reksicherung-bootstrap`](../../.agents/skills/reksicherung-bootstrap/SKILL.md).
 
 Human onboarding: [`docs/getting-started.md`](../../docs/getting-started.md).  
 Full AI input registry: [`docs/inputs.md`](../../docs/inputs.md).

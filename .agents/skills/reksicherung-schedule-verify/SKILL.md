@@ -23,7 +23,7 @@ Do not start/stop containers from this skill.
 
 - `I-CATALOG` + refreshed `I-INVENTORY` (`reksicherung catalog -config …`)
 - Coverage policy (create if missing) — see template ideas in
-  `skills/reksicherung-airon-onboard/templates/coverage/POLICY.md`
+  `.agents/skills/reksicherung-airon-onboard/templates/coverage/POLICY.md`
 - Optional `I-ORCHESTRATOR-JOB` (`docs/schemas/orchestrator-job.schema.json`)
 - Optional Airon binding: `examples/airon/` or onboard pack `job/`
 

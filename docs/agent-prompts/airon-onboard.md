@@ -1,9 +1,9 @@
 # Agent prompt: Reksicherung + Airon onboard
 
-Follow `skills/reksicherung-airon-onboard/SKILL.md` and
-`skills/reksicherung-airon-onboard/reference-pitfalls.md`.
+Follow `.agents/skills/reksicherung-airon-onboard/SKILL.md` and
+`.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md`.
 
-Scaffold templates from `skills/reksicherung-airon-onboard/templates/` (fictional
+Scaffold templates from `.agents/skills/reksicherung-airon-onboard/templates/` (fictional
 example ids only — never copy real client `source_id`s into examples).
 
 ## Goal

@@ -1,6 +1,6 @@
 # Prompt: bootstrap Reksicherung lab
 
-Follow `skills/reksicherung-bootstrap/SKILL.md`, `docs/inputs.md`, and the
+Follow `.agents/skills/reksicherung-bootstrap/SKILL.md`, `docs/inputs.md`, and the
 copy-paste steps in `examples/compose/RUNBOOK.md` (do not invent OpenBao/SQL
 commands).
 

@@ -1,6 +1,6 @@
 # Prompt: generate backup provider config
 
-Follow `skills/reksicherung-configgen/SKILL.md` and `docs/inputs.md` (`I-CONFIGGEN`).
+Follow `.agents/skills/reksicherung-configgen/SKILL.md` and `docs/inputs.md` (`I-CONFIGGEN`).
 
 Start from the closest file under `examples/configgen/` (see that README table);
 replace fictional OpenBao refs and hostnames. Do not invent plaintext secrets.

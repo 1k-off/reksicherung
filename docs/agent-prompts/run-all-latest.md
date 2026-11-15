@@ -1,6 +1,6 @@
 # Prompt: run restore-check for all latest sources
 
-Follow `skills/reksicherung-restore-check/SKILL.md` and `docs/schemas/restore-check-prompt.md`.
+Follow `.agents/skills/reksicherung-restore-check/SKILL.md` and `docs/schemas/restore-check-prompt.md`.
 
 Slots:
 

@@ -17,7 +17,7 @@ install agents on servers, resolve OpenBao secrets, or start containers.
 ## Inputs
 
 - `I-CONFIGGEN` — `docs/schemas/configgen-input.schema.json`
-- **Operator examples:** [`examples/configgen/`](../../examples/configgen/) (MSSQL S3/Azure, SFTP, enhanced, resticprofile + Azure SAS)
+- **Operator examples:** [`examples/configgen/`](../../../examples/configgen/) (MSSQL S3/Azure, SFTP, enhanced, resticprofile + Azure SAS)
 - Schema fixtures: `docs/schemas/fixtures/valid/configgen.*.yaml`
 - Package docs: `internal/reksicherung/configgen/{input,gobackup,resticprofile}/README.md`
 

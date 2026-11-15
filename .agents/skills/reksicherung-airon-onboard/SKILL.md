@@ -78,7 +78,7 @@ Optional thin wrappers OK; RUNBOOK CLI remains authoritative.
 
 Copy compose/OpenBao from `examples/compose/`; MCP images
 `ghcr.io/1k-off/reksicherung/*`. Scaffold from
-`skills/reksicherung-airon-onboard/templates/` (fictional ids only — never copy
+`.agents/skills/reksicherung-airon-onboard/templates/` (fictional ids only — never copy
 real client `source_id`s into examples).
 
 Coverage: agent selects via `fs_read` catalog + registry — **no** host

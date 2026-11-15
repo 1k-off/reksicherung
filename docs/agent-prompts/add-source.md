@@ -1,6 +1,6 @@
 # Prompt: add backup source
 
-Follow `skills/reksicherung-add-source/SKILL.md`.
+Follow `.agents/skills/reksicherung-add-source/SKILL.md`.
 
 Slots:
 

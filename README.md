@@ -14,9 +14,9 @@ Module path: `github.com/1k-off/reksicherung`. Catalog API: `reksicherung.1node.
 | Terms (`source_id`, catalog, verdicts, …) | [`docs/glossary.md`](docs/glossary.md) |
 | Copy-paste OpenBao + SQL compose steps | [`examples/compose/RUNBOOK.md`](examples/compose/RUNBOOK.md) |
 | Cursor / Claude / any MCP host + GHCR | [`docs/mcp-clients.md`](docs/mcp-clients.md) |
-| Stack bootstrap (GHCR pull) | [`skills/reksicherung-bootstrap/SKILL.md`](skills/reksicherung-bootstrap/SKILL.md) |
-| Airon lab pack (GHCR) | [`skills/reksicherung-airon-onboard/SKILL.md`](skills/reksicherung-airon-onboard/SKILL.md) |
-| AI agent skill map | [`skills/reksicherung-index/SKILL.md`](skills/reksicherung-index/SKILL.md) |
+| Stack bootstrap (GHCR pull) | [`.agents/skills/reksicherung-bootstrap/SKILL.md`](.agents/skills/reksicherung-bootstrap/SKILL.md) |
+| Airon lab pack (GHCR) | [`.agents/skills/reksicherung-airon-onboard/SKILL.md`](.agents/skills/reksicherung-airon-onboard/SKILL.md) |
+| AI agent skill map | [`.agents/skills/reksicherung-index/SKILL.md`](.agents/skills/reksicherung-index/SKILL.md) |
 
 **AI-first contracts:** all expected inputs are in [`docs/inputs.md`](docs/inputs.md) with schemas under [`docs/schemas/`](docs/schemas/).
 
@@ -36,11 +36,11 @@ GHCR images (lab tag `latest`; pin digests for production):
 ## Operator journey (summary)
 
 1. Compose stack: OpenBao + SQL + reconciler — [`examples/compose/RUNBOOK.md`](examples/compose/RUNBOOK.md).
-2. **Optional** backup-as-code: templates in [`examples/configgen/`](examples/configgen/), then `reksicherung configgen` ([`reksicherung-configgen`](skills/reksicherung-configgen/SKILL.md)).
-3. Thin catalog + OpenBao `sources/<id>` ([`examples/catalog.example.yaml`](examples/catalog.example.yaml), [`reksicherung-add-source`](skills/reksicherung-add-source/SKILL.md)).
-4. Attach MCP ([`docs/mcp-clients.md`](docs/mcp-clients.md) or Airon) and dry-run ([`reksicherung-restore-check`](skills/reksicherung-restore-check/SKILL.md)).
-5. Recurring coverage after PASS ([`reksicherung-schedule-verify`](skills/reksicherung-schedule-verify/SKILL.md)).
-6. Day-2: [`docs/operations.md`](docs/operations.md), [`reksicherung-operate`](skills/reksicherung-operate/SKILL.md).
+2. **Optional** backup-as-code: templates in [`examples/configgen/`](examples/configgen/), then `reksicherung configgen` ([`reksicherung-configgen`](.agents/skills/reksicherung-configgen/SKILL.md)).
+3. Thin catalog + OpenBao `sources/<id>` ([`examples/catalog.example.yaml`](examples/catalog.example.yaml), [`reksicherung-add-source`](.agents/skills/reksicherung-add-source/SKILL.md)).
+4. Attach MCP ([`docs/mcp-clients.md`](docs/mcp-clients.md) or Airon) and dry-run ([`reksicherung-restore-check`](.agents/skills/reksicherung-restore-check/SKILL.md)).
+5. Recurring coverage after PASS ([`reksicherung-schedule-verify`](.agents/skills/reksicherung-schedule-verify/SKILL.md)).
+6. Day-2: [`docs/operations.md`](docs/operations.md), [`reksicherung-operate`](.agents/skills/reksicherung-operate/SKILL.md).
 
 ## Operate
 

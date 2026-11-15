@@ -10,10 +10,10 @@ description: >-
 
 Orchestrator-agnostic. Airon is optional (`reksicherung-airon-onboard`).
 
-**Humans first:** [`docs/getting-started.md`](../../docs/getting-started.md) ·
-glossary [`docs/glossary.md`](../../docs/glossary.md) ·
-compose [`examples/compose/RUNBOOK.md`](../../examples/compose/RUNBOOK.md) ·
-MCP host [`docs/mcp-clients.md`](../../docs/mcp-clients.md).
+**Humans first:** [`docs/getting-started.md`](../../../docs/getting-started.md) ·
+glossary [`docs/glossary.md`](../../../docs/glossary.md) ·
+compose [`examples/compose/RUNBOOK.md`](../../../examples/compose/RUNBOOK.md) ·
+MCP host [`docs/mcp-clients.md`](../../../docs/mcp-clients.md).
 
 Contracts: `docs/inputs.md` · schemas: `docs/schemas/`.
 

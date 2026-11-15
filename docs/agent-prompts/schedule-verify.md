@@ -1,6 +1,6 @@
 # Prompt: enable recurring restore verification
 
-Follow `skills/reksicherung-schedule-verify/SKILL.md` and `docs/inputs.md`.
+Follow `.agents/skills/reksicherung-schedule-verify/SKILL.md` and `docs/inputs.md`.
 
 Slots:
 

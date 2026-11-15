@@ -13,10 +13,10 @@ binding of `I-ORCHESTRATOR-JOB`.
 For a client/lab package with **GHCR images**, `$RUNTIME run --rm -i`, and
 Windows/Podman pitfalls applied:
 
-1. Skill [`skills/reksicherung-airon-onboard/SKILL.md`](../../skills/reksicherung-airon-onboard/SKILL.md)
-2. Templates under `skills/reksicherung-airon-onboard/templates/` (especially
+1. Skill [`.agents/skills/reksicherung-airon-onboard/SKILL.md`](../../.agents/skills/reksicherung-airon-onboard/SKILL.md)
+2. Templates under `.agents/skills/reksicherung-airon-onboard/templates/` (especially
    `airon-mcp-stdio.yaml` and `runbook-skeleton.md`)
-3. Pitfalls: [`skills/reksicherung-airon-onboard/reference-pitfalls.md`](../../skills/reksicherung-airon-onboard/reference-pitfalls.md)
+3. Pitfalls: [`.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md`](../../.agents/skills/reksicherung-airon-onboard/reference-pitfalls.md)
 
 Without Airon: [`docs/getting-started.md`](../../docs/getting-started.md) and
 [`docs/mcp-clients.md`](../../docs/mcp-clients.md).
