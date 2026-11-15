@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	restoremysql "github.com/1k-off/reksicherung/internal/reksicherung/restore/mysql"
 	sqlserver "github.com/1k-off/reksicherung/internal/reksicherung/restore/sqlserver"
 	"github.com/1k-off/reksicherung/internal/reksicherung/runregistry"
 	"github.com/1k-off/reksicherung/internal/reksicherung/secrets"
@@ -34,16 +36,13 @@ func runCleanup(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 	defer store.Close()
 
-	dropper, err := newSQLDropperFromEnv(ctx, os.Getenv)
-	if err != nil {
-		return err
-	}
+	dropper := newEngineDropperFromEnv(os.Getenv)
 	record, err := runregistry.CleanupHeld(ctx, store, dropper, *runID)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "cleanup succeeded: run=%s database=%s status=%s\n",
-		record.ID, record.DatabaseName, record.CleanupStatus)
+	fmt.Fprintf(stdout, "cleanup succeeded: run=%s database=%s type=%s status=%s\n",
+		record.ID, record.DatabaseName, record.DatabaseType.Effective(), record.CleanupStatus)
 	return nil
 }
 
@@ -66,10 +65,7 @@ func runReconcile(ctx context.Context, args []string, stderr io.Writer) error {
 	}
 	defer store.Close()
 
-	dropper, err := newSQLDropperFromEnv(ctx, os.Getenv)
-	if err != nil {
-		return err
-	}
+	dropper := newEngineDropperFromEnv(os.Getenv)
 	reconciler := runregistry.Reconciler{Store: store, Databases: dropper}
 	if *once {
 		outcomes, err := reconciler.Reconcile(ctx, time.Now().UTC())
@@ -94,6 +90,37 @@ func runReconcile(ctx context.Context, args []string, stderr io.Writer) error {
 		}
 		fmt.Fprintf(stderr, "cleanup ok run=%s status=%s\n", outcome.RunID, outcome.Status)
 	})
+}
+
+// lazyDropper defers building an engine dropper (and resolving its secrets)
+// until the first drop, so a cleanup of one engine does not require the other
+// engine's configuration.
+type lazyDropper struct {
+	build   func(context.Context) (runregistry.DatabaseDropper, error)
+	once    sync.Once
+	dropper runregistry.DatabaseDropper
+	err     error
+}
+
+func (l *lazyDropper) DropDatabase(ctx context.Context, runID string) error {
+	l.once.Do(func() { l.dropper, l.err = l.build(ctx) })
+	if l.err != nil {
+		return l.err
+	}
+	return l.dropper.DropDatabase(ctx, runID)
+}
+
+// newEngineDropperFromEnv routes drops by Record.DatabaseType (empty means
+// sqlserver). Engine configuration is resolved lazily.
+func newEngineDropperFromEnv(getenv func(string) string) runregistry.EngineDropper {
+	return runregistry.EngineDropper{
+		SQLServer: &lazyDropper{build: func(ctx context.Context) (runregistry.DatabaseDropper, error) {
+			return newSQLDropperFromEnv(ctx, getenv)
+		}},
+		MySQL: &lazyDropper{build: func(ctx context.Context) (runregistry.DatabaseDropper, error) {
+			return newMySQLDropperFromEnv(ctx, getenv)
+		}},
+	}
 }
 
 type sqlDropper struct {
@@ -164,4 +191,71 @@ func loadCleanupSQLConfig(getenv func(string) string) (cleanupSQLConfig, error) 
 		config.sqlCmd = "sqlcmd"
 	}
 	return config, nil
+}
+
+type mysqlDropper struct {
+	operations *restoremysql.RemoteOperations
+}
+
+func (dropper mysqlDropper) DropDatabase(ctx context.Context, runID string) error {
+	return dropper.operations.DropDatabase(ctx, runID)
+}
+
+type cleanupMySQLConfig struct {
+	mysqlCmd       string
+	mysqlCheckCmd  string
+	tempDir        string
+	openBaoAddress string
+	openBaoToken   string
+}
+
+func loadCleanupMySQLConfig(getenv func(string) string) (cleanupMySQLConfig, error) {
+	config := cleanupMySQLConfig{
+		mysqlCmd:       getenv("REKSICHERUNG_MYSQL"),
+		mysqlCheckCmd:  getenv("REKSICHERUNG_MYSQLCHECK"),
+		tempDir:        getenv("REKSICHERUNG_MYSQL_TMPDIR"),
+		openBaoAddress: getenv("REKSICHERUNG_OPENBAO_ADDR"),
+		openBaoToken:   getenv("REKSICHERUNG_OPENBAO_TOKEN"),
+	}
+	if strings.TrimSpace(config.openBaoAddress) == "" || strings.TrimSpace(config.openBaoToken) == "" {
+		return cleanupMySQLConfig{}, errors.New("required MySQL cleanup configuration is missing")
+	}
+	if config.mysqlCmd == "" {
+		config.mysqlCmd = "mysql"
+	}
+	if config.mysqlCheckCmd == "" {
+		config.mysqlCheckCmd = "mysqlcheck"
+	}
+	return config, nil
+}
+
+func newMySQLDropperFromEnv(ctx context.Context, getenv func(string) string) (runregistry.DatabaseDropper, error) {
+	config, err := loadCleanupMySQLConfig(getenv)
+	if err != nil {
+		return nil, err
+	}
+	provider, err := openbao.New(config.openBaoAddress, config.openBaoToken)
+	if err != nil {
+		return nil, errors.New("could not initialize configured OpenBao secret provider")
+	}
+	material, err := secrets.ResolveMySQL(ctx, provider)
+	if err != nil {
+		return nil, errors.New("could not resolve MySQL connection from OpenBao")
+	}
+	defer material.Clear()
+
+	operations, err := restoremysql.NewRemote(nil, restoremysql.RemoteConfig{
+		Host:       material.Host,
+		Port:       material.Port,
+		Username:   material.Username,
+		Password:   string(material.Password),
+		MySQL:      config.mysqlCmd,
+		MySQLCheck: config.mysqlCheckCmd,
+		TempDir:    config.tempDir,
+		Timeout:    time.Minute,
+	})
+	if err != nil {
+		return nil, errors.New("could not initialize MySQL cleanup operations")
+	}
+	return mysqlDropper{operations: operations}, nil
 }

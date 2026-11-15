@@ -58,17 +58,19 @@ var (
 // Record contains only non-secret run metadata. Secret values, prompts, and
 // business data must be stored elsewhere and excluded from the run registry.
 type Record struct {
-	ID             string        `json:"id"`
-	ExternalRunID     string        `json:"external_run_id,omitempty"`
-	Status         Status        `json:"status"`
-	Verdict        Verdict       `json:"verdict"`
-	CleanupMode    CleanupMode   `json:"cleanup_mode"`
-	CleanupStatus  CleanupStatus `json:"cleanup_status"`
-	DatabaseName   string        `json:"database_name,omitempty"`
-	LeaseExpiresAt time.Time     `json:"lease_expires_at"`
-	CreatedAt      time.Time     `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
-	Revision       uint64        `json:"revision"`
+	ID            string        `json:"id"`
+	ExternalRunID string        `json:"external_run_id,omitempty"`
+	Status        Status        `json:"status"`
+	Verdict       Verdict       `json:"verdict"`
+	CleanupMode   CleanupMode   `json:"cleanup_mode"`
+	CleanupStatus CleanupStatus `json:"cleanup_status"`
+	DatabaseName  string        `json:"database_name,omitempty"`
+	// DatabaseType is sqlserver, mysql, or empty (legacy, treated as sqlserver).
+	DatabaseType   DatabaseType `json:"database_type,omitempty"`
+	LeaseExpiresAt time.Time    `json:"lease_expires_at"`
+	CreatedAt      time.Time    `json:"created_at"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	Revision       uint64       `json:"revision"`
 }
 
 // NewRecord creates a run that is initially eligible for cleanup if its lease
@@ -157,6 +159,9 @@ func (record Record) Validate() error {
 	}
 	if record.DatabaseName != "" && !databaseNamePattern.MatchString(record.DatabaseName) {
 		return fmt.Errorf("%w: invalid database name", ErrInvalidRecord)
+	}
+	if !record.DatabaseType.valid() {
+		return fmt.Errorf("%w: invalid database type %q", ErrInvalidRecord, record.DatabaseType)
 	}
 	return nil
 }
