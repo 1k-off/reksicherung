@@ -6,6 +6,7 @@ NUL
 
 # Superpowers brainstorm/plan artifacts (local only, never commit)
 docs/superpowers/
+.superpowers/
 
 # Binaries
 /bin/
