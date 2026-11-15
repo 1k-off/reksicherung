@@ -24,22 +24,34 @@ func TestResolvePlainAndNestedArtifacts(t *testing.T) {
 	})
 
 	tests := []struct {
-		name string
-		data []byte
-		kind Kind
-		want []byte
+		name     string
+		fileName string
+		data     []byte
+		kind     Kind
+		want     []byte
 	}{
 		{name: "plain BAK", data: []byte(testBackup), kind: KindSQLBackup, want: []byte(testBackup)},
 		{name: "plain BACPAC", data: bacpac, kind: KindBACPAC, want: bacpac},
 		{name: "ZIP with nested BAK path", data: zipBackup, kind: KindSQLBackup, want: []byte(testBackup)},
 		{name: "gzip tar containing ZIP", data: tarContainingZip, kind: KindSQLBackup, want: []byte(testBackup)},
 		{name: "gzip tar prefers bacpac over nested tar", data: tarWithWrapperAndTerminal, kind: KindBACPAC, want: bacpac},
+		{name: "plain SQL dump", data: []byte("-- MySQL dump\n"), fileName: "app.sql", kind: KindSQL, want: []byte("-- MySQL dump\n")},
+		{name: "gzip SQL dump", data: gzipBytes(t, []byte("CREATE TABLE t(i INT);\n")), fileName: "app.sql.gz", kind: KindSQL, want: []byte("CREATE TABLE t(i INT);\n")},
+		{name: "ZIP nested SQL", data: makeZIP(t, map[string][]byte{"db/app.sql": []byte("USE `app`;\n")}), kind: KindSQL, want: []byte("USE `app`;\n")},
+		{name: "ZIP nested gzip SQL", data: makeZIP(t, map[string][]byte{"db/app.sql.gz": gzipBytes(t, []byte("USE `app`;\n"))}), kind: KindSQL, want: []byte("USE `app`;\n")},
+		{name: "gzip tar nested SQL", data: makeTarGzip(t, map[string][]byte{"dump/app.sql": []byte("SELECT 1;\n")}), kind: KindSQL, want: []byte("SELECT 1;\n")},
+		{name: "unknown extension still maps to BAK", data: []byte(testBackup), fileName: "backup.dat", kind: KindSQLBackup, want: []byte(testBackup)},
+		{name: "uppercase SQL extension", data: []byte("-- dump\n"), fileName: "APP.SQL", kind: KindSQL, want: []byte("-- dump\n")},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			tempDir := t.TempDir()
-			resolved, kind, err := Resolve(context.Background(), io.NopCloser(bytes.NewReader(test.data)), "backup", testLimits(tempDir))
+			fileName := test.fileName
+			if fileName == "" {
+				fileName = "backup"
+			}
+			resolved, kind, err := Resolve(context.Background(), io.NopCloser(bytes.NewReader(test.data)), fileName, testLimits(tempDir))
 			if err != nil {
 				t.Fatalf("Resolve() error = %v", err)
 			}
@@ -207,6 +219,105 @@ func TestResolveRejectsTarLinksAndHonorsCancellation(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Resolve(canceled) error = %v, want context.Canceled", err)
 	}
+}
+
+func TestResolveSQLFailsClosed(t *testing.T) {
+	tests := []struct {
+		name     string
+		fileName string
+		data     []byte
+		limits   Limits
+		want     error
+	}{
+		{
+			name: "ZIP with BAK and SQL is ambiguous", fileName: "archive.zip",
+			data:   makeZIP(t, map[string][]byte{"a.bak": []byte("a"), "b.sql": []byte("b")}),
+			limits: testLimits(t.TempDir()), want: ErrAmbiguousArchive,
+		},
+		{
+			name: "ZIP with two SQL dumps is ambiguous", fileName: "archive.zip",
+			data:   makeZIP(t, map[string][]byte{"a.sql": []byte("a"), "b.sql": []byte("b")}),
+			limits: testLimits(t.TempDir()), want: ErrAmbiguousArchive,
+		},
+		{
+			name: "corrupt gzip SQL", fileName: "app.sql.gz",
+			data:   []byte{0x1f, 0x8b, 0x08, 0x00, 0x01, 0x02},
+			limits: testLimits(t.TempDir()), want: ErrInvalidArchive,
+		},
+		{
+			name: "gzip SQL expanded limit", fileName: "app.sql.gz",
+			data:   gzipBytes(t, bytes.Repeat([]byte("x"), 1024)),
+			limits: Limits{MaxInputBytes: 1 << 20, MaxExpandedBytes: 16, MaxTemporaryBytes: 1 << 20, TempDir: t.TempDir()},
+			want:   ErrLimitExceeded,
+		},
+		{
+			name: "gzip SQL decompressing to ZIP without artifact", fileName: "app.sql.gz",
+			data:   gzipBytes(t, makeZIP(t, map[string][]byte{"notes.txt": []byte("x")})),
+			limits: testLimits(t.TempDir()), want: ErrNoArtifact,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := Resolve(context.Background(), io.NopCloser(bytes.NewReader(test.data)), test.fileName, test.limits)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("Resolve() error = %v, want errors.Is(_, %v)", err, test.want)
+			}
+			if entries, readErr := os.ReadDir(test.limits.TempDir); readErr != nil || len(entries) != 0 {
+				t.Fatalf("temporary files after failure = %v, err %v; want none", entries, readErr)
+			}
+		})
+	}
+}
+
+func TestKindHintForName(t *testing.T) {
+	tests := map[string]Kind{
+		"db/app.bak":    KindSQLBackup,
+		"db/app.bacpac": KindBACPAC,
+		"db/app.sql":    KindSQL,
+		"db/APP.SQL.GZ": KindSQL,
+		"db/app.sql.gz": KindSQL,
+		"db/app.txt":    "",
+	}
+	for name, want := range tests {
+		if got := kindHintForName(name); got != want {
+			t.Errorf("kindHintForName(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestListCandidatesIncludesSQL(t *testing.T) {
+	data := makeZIP(t, map[string][]byte{"shop/a.sql": []byte("a"), "shop/b.sql.gz": gzipBytes(t, []byte("b"))})
+	listed, err := ListCandidates(context.Background(), io.NopCloser(bytes.NewReader(data)), "archive.zip", testLimits(t.TempDir()))
+	if err != nil || len(listed.Candidates) != 2 {
+		t.Fatalf("ListCandidates() = %#v, err %v", listed, err)
+	}
+	for _, candidate := range listed.Candidates {
+		if candidate.KindHint != KindSQL {
+			t.Errorf("candidate %q hint = %q, want %q", candidate.Path, candidate.KindHint, KindSQL)
+		}
+	}
+	resolved, kind, err := ResolveWith(context.Background(), io.NopCloser(bytes.NewReader(data)), "archive.zip", testLimits(t.TempDir()), ResolveOptions{MemberPath: "shop/b.sql.gz"})
+	if err != nil {
+		t.Fatalf("ResolveWith() error = %v", err)
+	}
+	defer resolved.Close()
+	got, err := io.ReadAll(resolved)
+	if err != nil || kind != KindSQL || string(got) != "b" {
+		t.Fatalf("ResolveWith() kind=%q data=%q err=%v", kind, got, err)
+	}
+}
+
+func gzipBytes(t *testing.T, contents []byte) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := gzip.NewWriter(&buffer)
+	if _, err := writer.Write(contents); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }
 
 func testLimits(tempDir string) Limits {

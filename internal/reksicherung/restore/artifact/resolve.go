@@ -24,6 +24,8 @@ type Kind string
 const (
 	KindSQLBackup Kind = "bak"
 	KindBACPAC    Kind = "bacpac"
+	// KindSQL is a logical SQL text dump (for example mysqldump output).
+	KindSQL Kind = "sql"
 )
 
 const (
@@ -60,6 +62,9 @@ const (
 	archiveZIP
 	archiveTar
 	archiveTarGzip
+	// archiveGzipSQL is a single gzip stream named *.sql.gz. It is unwrapped to
+	// a *.sql temp file and re-detected, so tar/ZIP payloads still fail closed.
+	archiveGzipSQL
 )
 
 type tempManager struct {
@@ -184,6 +189,9 @@ func (manager *tempManager) detect(file *tempFile, name string) (archiveType, Ki
 		return archiveZIP, "", nil
 	}
 	if isGzip {
+		if strings.HasSuffix(lower, ".sql.gz") {
+			return archiveGzipSQL, "", nil
+		}
 		return archiveTarGzip, "", nil
 	}
 	if isTar || extension == ".tar" {
@@ -195,6 +203,8 @@ func (manager *tempManager) detect(file *tempFile, name string) (archiveType, Ki
 			return archiveNone, KindSQLBackup, nil
 		case ".bacpac":
 			return archiveNone, KindBACPAC, nil
+		case ".sql":
+			return archiveNone, KindSQL, nil
 		}
 		if isArchiveName(lower) {
 			return archiveNone, "", ErrInvalidArchive
@@ -204,6 +214,43 @@ func (manager *tempManager) detect(file *tempFile, name string) (archiveType, Ki
 		return archiveNone, KindSQLBackup, nil
 	}
 	return archiveNone, "", ErrInvalidArchive
+}
+
+// extractGzipSQL streams a single gzip member into a private temp file and
+// returns the name without its .gz suffix so the payload is detected again.
+func (manager *tempManager) extractGzipSQL(parent *tempFile, name string) (*tempFile, string, error) {
+	reader, err := parent.open()
+	if err != nil {
+		return nil, "", ErrInvalidArchive
+	}
+	defer reader.Close()
+	gzipReader, err := gzip.NewReader(bufio.NewReader(reader))
+	if err != nil {
+		return nil, "", ErrInvalidArchive
+	}
+	defer gzipReader.Close()
+
+	maxBytes := manager.limits.MaxExpandedBytes - manager.expanded
+	if manager.limits.MaxTemporaryBytes < maxBytes {
+		maxBytes = manager.limits.MaxTemporaryBytes
+	}
+	output, err := manager.newFile(maxBytes)
+	if err != nil {
+		return nil, "", err
+	}
+	counted := &expandedReader{manager: manager, reader: gzipReader}
+	if err := copyToTemp(manager.ctx, counted, output, maxBytes); err != nil {
+		_ = output.remove()
+		if errors.Is(err, ErrLimitExceeded) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, "", err
+		}
+		return nil, "", ErrInvalidArchive
+	}
+	if err := output.closeWriter(); err != nil {
+		_ = output.remove()
+		return nil, "", ErrInvalidArchive
+	}
+	return output, name[:len(name)-len(".gz")], nil
 }
 
 func (manager *tempManager) extractZIP(parent *tempFile, preferredMember string) (*tempFile, string, error) {
@@ -692,14 +739,15 @@ func validateMemberPath(name string) error {
 func isCandidateName(name string) bool {
 	lower := strings.ToLower(name)
 	return strings.HasSuffix(lower, ".bak") || strings.HasSuffix(lower, ".bacpac") ||
-		strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".tar") ||
+		strings.HasSuffix(lower, ".sql") || strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".tar") ||
 		strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz") ||
 		strings.HasSuffix(lower, ".gz")
 }
 
 func isTerminalArtifactName(name string) bool {
 	lower := strings.ToLower(name)
-	return strings.HasSuffix(lower, ".bak") || strings.HasSuffix(lower, ".bacpac")
+	return strings.HasSuffix(lower, ".bak") || strings.HasSuffix(lower, ".bacpac") ||
+		strings.HasSuffix(lower, ".sql") || strings.HasSuffix(lower, ".sql.gz")
 }
 
 func preferTerminalZIPCandidates(candidates []*zip.File) []*zip.File {

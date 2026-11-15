@@ -127,6 +127,8 @@ func ResolveWith(ctx context.Context, source io.ReadCloser, sourceName string, l
 			next, nextName, err = manager.extractTar(current, false, opts.MemberPath)
 		case archiveTarGzip:
 			next, nextName, err = manager.extractTar(current, true, opts.MemberPath)
+		case archiveGzipSQL:
+			next, nextName, err = manager.extractGzipSQL(current, currentName)
 		default:
 			err = ErrUnsupported
 		}
@@ -196,6 +198,22 @@ func ListCandidates(ctx context.Context, source io.ReadCloser, sourceName string
 			return CandidateList{}, ErrNestingTooDeep
 		}
 
+		if archiveType == archiveGzipSQL {
+			next, nextName, err := manager.extractGzipSQL(current, currentName)
+			if err != nil {
+				return CandidateList{}, err
+			}
+			if err := current.remove(); err != nil {
+				_ = next.remove()
+				return CandidateList{}, ErrInvalidArchive
+			}
+			current, currentName = next, nextName
+			if err := current.closeWriter(); err != nil {
+				return CandidateList{}, ErrInvalidArchive
+			}
+			continue
+		}
+
 		var listed CandidateList
 		switch archiveType {
 		case archiveZIP:
@@ -263,6 +281,8 @@ func kindHintForName(name string) Kind {
 		return KindBACPAC
 	case strings.HasSuffix(lower, ".bak"):
 		return KindSQLBackup
+	case strings.HasSuffix(lower, ".sql"), strings.HasSuffix(lower, ".sql.gz"):
+		return KindSQL
 	default:
 		return ""
 	}
