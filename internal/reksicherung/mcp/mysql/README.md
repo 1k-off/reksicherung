@@ -22,6 +22,11 @@ target, anything else must equal `Database`. Identifiers are backtick-quoted
 (embedded backticks doubled; empty, NUL, control-character, or >64-character
 names rejected). Metadata filters and limits are bound parameters.
 
+MCP tool servers additionally protocol-encode identifier strings in model-facing
+output (`internal/reksicherung/mcp/protocol`): only `[A-Za-z_][A-Za-z0-9_]*`
+literals are emitted plain; everything else becomes an opaque `b64:` token so
+crafted dump names cannot be surfaced as natural-language instructions.
+
 If the target is `information_schema` (`AnchorDatabase`, used when the process is
 not pinned to one database), the service refuses to inspect it and
 `ForDatabase` re-scopes it only to run-scoped names matching

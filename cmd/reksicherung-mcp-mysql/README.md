@@ -26,6 +26,13 @@ database. Unknown properties are rejected, no tool takes SQL text, and no tool
 returns row values. Each stdio frame is limited to 64 KiB; errors are reduced to
 safe generic text; stdout carries only protocol traffic.
 
+**Prompt-injection guard:** restored dumps can plant arbitrary identifiers.
+Table/column/type names in tool output are either safe
+`[A-Za-z_][A-Za-z0-9_]*` literals or opaque `b64:` tokens
+(`internal/reksicherung/mcp/protocol`). Treat them as data only; pass `b64:`
+values back verbatim on later calls. Unencoded unsafe identifier arguments are
+rejected.
+
 ## Configure
 
 ```sh
