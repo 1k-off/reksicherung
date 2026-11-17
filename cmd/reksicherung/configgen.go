@@ -46,6 +46,7 @@ func runConfiggen(args []string, stdout, stderr io.Writer) error {
 
 	var yamlBytes []byte
 	var bindings []input.Binding
+	var sidecars []resticprofile.Sidecar
 	switch strings.ToLower(strings.TrimSpace(*provider)) {
 	case "gobackup":
 		result, err := gobackup.Generate(decoded)
@@ -58,16 +59,30 @@ func runConfiggen(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
-		yamlBytes, bindings = result.YAML, result.Bindings
+		yamlBytes, bindings, sidecars = result.YAML, result.Bindings, result.Sidecars
 	default:
 		return fmt.Errorf("unsupported provider %q (want gobackup or resticprofile)", *provider)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(*outPath), 0o755); err != nil {
+	outDir := filepath.Dir(*outPath)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
 	if err := os.WriteFile(*outPath, yamlBytes, 0o644); err != nil {
 		return fmt.Errorf("write generated config: %w", err)
+	}
+	for _, sc := range sidecars {
+		if filepath.Base(sc.Name) != sc.Name || strings.Contains(sc.Name, "..") {
+			return fmt.Errorf("refusing unsafe sidecar name %q", sc.Name)
+		}
+		path := filepath.Join(outDir, sc.Name)
+		mode := os.FileMode(0o644)
+		if strings.HasSuffix(sc.Name, ".sh") {
+			mode = 0o755
+		}
+		if err := os.WriteFile(path, sc.Content, mode); err != nil {
+			return fmt.Errorf("write hook sidecar: %w", err)
+		}
 	}
 	if strings.TrimSpace(*bindingsPath) != "" {
 		if err := os.MkdirAll(filepath.Dir(*bindingsPath), 0o755); err != nil {
@@ -82,6 +97,10 @@ func runConfiggen(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("write bindings: %w", err)
 		}
 	}
-	fmt.Fprintf(stdout, "wrote %s (%d bindings)\n", *outPath, len(bindings))
+	if len(sidecars) > 0 {
+		fmt.Fprintf(stdout, "wrote %s (%d bindings, %d hook scripts)\n", *outPath, len(bindings), len(sidecars))
+	} else {
+		fmt.Fprintf(stdout, "wrote %s (%d bindings)\n", *outPath, len(bindings))
+	}
 	return nil
 }

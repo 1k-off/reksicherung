@@ -202,7 +202,7 @@ func TestNewEndpointValidation(t *testing.T) {
 		{name: "remote HTTP rejected", endpoint: "http://bao.example:8200", token: "token", wantErr: true},
 		{name: "endpoint credentials rejected", endpoint: "https://user@bao.example", token: "token", wantErr: true},
 		{name: "endpoint query rejected", endpoint: "https://bao.example?token=secret", token: "token", wantErr: true},
-		{name: "empty token rejected", endpoint: "https://bao.example", token: "", wantErr: true},
+		{name: "empty token allowed for login/health", endpoint: "https://bao.example", token: ""},
 		{name: "whitespace token rejected", endpoint: "https://bao.example", token: " token", wantErr: true},
 		{name: "header injection rejected", endpoint: "https://bao.example", token: "token\r\nX-Injected: yes", wantErr: true},
 	}

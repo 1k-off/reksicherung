@@ -60,7 +60,7 @@ func New(endpoint, token string) (*Provider, error) {
 	if parsed.Scheme == "http" && !HTTPEndpointAllowed(parsed.Hostname()) {
 		return nil, errors.New("openbao: HTTPS required for non-loopback endpoint")
 	}
-	if !validToken(token) {
+	if token != "" && !validToken(token) {
 		return nil, errors.New("openbao: invalid token")
 	}
 	parsed.Path = ""

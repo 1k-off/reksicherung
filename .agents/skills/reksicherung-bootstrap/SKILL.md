@@ -60,6 +60,8 @@ done
    start OpenBao → init/unseal → enable KV v2 → start SQL + reconciler →
    `chmod 1777` on `reksicherung_sql-backup` → seed `I-OPENBAO-SQL` (+ optional
    defaults) per `docs/schemas/openbao-source-kv.md`.
+   For a **public** OpenBao (Traefik TLS on a high port) instead of lab loopback,
+   use [`examples/openbao-traefik/`](../../../examples/openbao-traefik/).
 4. Create SQL restore login matching OpenBao `USERNAME`/`PASSWORD` (RUNBOOK §7)
    or use lab `sa` with matching OpenBao password.
    **MySQL sources only:** set `MYSQL_ROOT_PASSWORD`, `--profile mysql up -d mysql` (opt-in profile), create the

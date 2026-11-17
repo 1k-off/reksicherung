@@ -92,6 +92,42 @@ databases:
 	}
 }
 
+func TestValidateAcceptsWindowsArchivePathsAndHooks(t *testing.T) {
+	in := simpleInput()
+	in.Archive = &Archive{Includes: []string{`C:\backups\app.bacpac`, `C:/backups/other.bak`}}
+	in.Hooks = Hooks{
+		RunBefore: StringList{`sqlpackage /Action:Export /TargetFile:C:\backups\app.bacpac`},
+		RunAfter:  StringList{`del C:\backups\app.bacpac`},
+	}
+	if err := in.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	decoded, err := Decode(strings.NewReader(`project: {name: win-app}
+storage: {type: s3, bucket: backups}
+schedules: {cron: "0 5 * * *", healthcheck_url_ref: ` + healthRef + `}
+archive:
+  includes: ["C:/backups/app.bacpac"]
+hooks:
+  run_before: "echo before"
+  run_after:
+    - "echo after-1"
+    - "echo after-2"
+`))
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	if err := decoded.Validate(); err != nil {
+		t.Fatalf("decoded Validate() error = %v", err)
+	}
+	if got := []string(decoded.Hooks.RunBefore); len(got) != 1 || got[0] != "echo before" {
+		t.Fatalf("run_before = %#v", decoded.Hooks.RunBefore)
+	}
+	if got := []string(decoded.Hooks.RunAfter); len(got) != 2 {
+		t.Fatalf("run_after = %#v", decoded.Hooks.RunAfter)
+	}
+}
+
 func TestValidationRejectsUnsafeNamesPathsAndReferences(t *testing.T) {
 	tests := map[string]func(*Input){
 		"project traversal":   func(in *Input) { in.Project.Name = "../bad" },
@@ -99,6 +135,8 @@ func TestValidationRejectsUnsafeNamesPathsAndReferences(t *testing.T) {
 		"archive traversal":   func(in *Input) { in.Archive = &Archive{Includes: []string{"/var/../etc"}} },
 		"invalid secret ref":  func(in *Input) { in.Storage.AccessKeyIDRef = "not-a-reference" },
 		"empty schedule keep": func(in *Input) { in.Schedules.Keep = -1 },
+		"relative archive":    func(in *Input) { in.Archive = &Archive{Includes: []string{"var/lib/app"}} },
+		"empty hook":          func(in *Input) { in.Hooks.RunBefore = StringList{" "} },
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

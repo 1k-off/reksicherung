@@ -1,0 +1,32 @@
+# I-CONFIGGEN → reksicherung configgen -provider resticprofile
+# Windows sqlbak-style: operator dump via hooks, restic archives the artifact.
+# databases[] remains unsupported for resticprofile — dump is operator-owned.
+# Hooks with nested quotes are written to *.ps1 sidecars beside the YAML;
+# profile run-before/run-after call `powershell -File <script>.ps1` (#582).
+project:
+  name: demo-win-sql
+  service: app
+mode: simple
+storage:
+  type: s3
+  bucket: demo-backups
+  region: eu-central-1
+  endpoint: https://objects.example.test
+  path_prefix: demo-win/prod
+  access_key_id_ref: openbao://secret/reksicherung/sources/demo-win-sql#S3_ACCESS_KEY_ID
+  secret_access_key_ref: openbao://secret/reksicherung/sources/demo-win-sql#S3_SECRET_ACCESS_KEY
+schedules:
+  cron: "0 2 * * *"
+  keep: 14
+  healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-win-sql
+archive:
+  includes:
+    - "C:/backups/demo-win-sql.bacpac"
+hooks:
+  run_before:
+    - 'sqlpackage /Action:Export /SourceConnectionString:"%SQLCMDLINE%" /TargetFile:"C:\backups\demo-win-sql.bacpac"'
+  run_after:
+    - 'del /f /q "C:\backups\demo-win-sql.bacpac"'
+encryption:
+  enabled: true
+  password_ref: openbao://secret/reksicherung/sources/demo-win-sql#RESTIC_PASSWORD

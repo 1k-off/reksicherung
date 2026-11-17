@@ -1,0 +1,21 @@
+[Unit]
+Description=Unseal Reksicherung OpenBao (disk key — weaker than KMS)
+After=docker.service network-online.target
+Wants=docker.service network-online.target
+# If compose is managed by a unit, add After=/Requires= that unit.
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=BAO_ADDR=http://127.0.0.1:8200
+Environment=OPENBAO_UNSEAL_KEY_FILE=/etc/openbao/unseal.key
+Environment=OPENBAO_UNSEAL_WAIT_SECS=180
+# Install unseal.sh to a fixed host path, then point ExecStart at it.
+ExecStart=/usr/local/lib/reksicherung/openbao-unseal.sh
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=6
+StartLimitIntervalSec=300
+
+[Install]
+WantedBy=multi-user.target

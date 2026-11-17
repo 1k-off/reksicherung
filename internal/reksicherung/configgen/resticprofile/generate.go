@@ -10,15 +10,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Result contains the generated resticprofile YAML and runtime secret bindings.
+// Result contains the generated resticprofile YAML, runtime secret bindings,
+// and optional hook sidecar scripts (written beside the YAML by the CLI).
 type Result struct {
 	YAML     []byte
 	Bindings []input.Binding
+	Sidecars []Sidecar
 }
 
 // Generate validates the shared input and the resticprofile subset, then
 // renders deterministic resticprofile v1 YAML. Secret references become
 // $REKSICHERUNG_* placeholders; no secret values are resolved or returned.
+// Hook commands are wrapped into sidecar scripts to avoid Windows cmd quoting
+// bugs in resticprofile run-before/run-after.
 func Generate(in input.Input) (Result, error) {
 	if err := in.Validate(); err != nil {
 		return Result{}, err
@@ -26,8 +30,14 @@ func Generate(in input.Input) (Result, error) {
 	if err := ValidateForProvider(in); err != nil {
 		return Result{}, err
 	}
+	sidecars, beforeInv, afterInv := wrapHooks(in)
+	for _, sc := range sidecars {
+		if err := validSidecarName(sc.Name); err != nil {
+			return Result{}, err
+		}
+	}
 	bindings := input.NewBinder()
-	doc, err := buildDocument(in, bindings)
+	doc, err := buildDocument(in, bindings, beforeInv, afterInv)
 	if err != nil {
 		return Result{}, err
 	}
@@ -35,10 +45,10 @@ func Generate(in input.Input) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("marshal resticprofile config: %w", err)
 	}
-	return Result{YAML: output, Bindings: bindings.Bindings()}, nil
+	return Result{YAML: output, Bindings: bindings.Bindings(), Sidecars: sidecars}, nil
 }
 
-func buildDocument(in input.Input, bindings *input.Binder) (map[string]any, error) {
+func buildDocument(in input.Input, bindings *input.Binder, beforeInv, afterInv []string) (map[string]any, error) {
 	env := map[string]any{}
 	switch strings.ToLower(in.Storage.Type) {
 	case "azure":
@@ -75,7 +85,7 @@ func buildDocument(in input.Input, bindings *input.Binder) (map[string]any, erro
 
 	switch mode {
 	case input.ModeSimple:
-		profile, err := buildProfile(in, bindings, "", in.Schedules.Cron, defaultKeep(in.Schedules.Keep, 14), in.Schedules.HealthcheckURLRef, "schedules_healthcheck_url")
+		profile, err := buildProfile(in, bindings, "", in.Schedules.Cron, defaultKeep(in.Schedules.Keep, 14), in.Schedules.HealthcheckURLRef, "schedules_healthcheck_url", beforeInv, afterInv)
 		if err != nil {
 			return nil, err
 		}
@@ -102,6 +112,8 @@ func buildDocument(in input.Input, bindings *input.Binder) (map[string]any, erro
 				defaultKeep(tier.schedule.Keep, tier.keep),
 				tier.schedule.HealthcheckURLRef,
 				"schedules_"+tier.name+"_healthcheck_url",
+				beforeInv,
+				afterInv,
 			)
 			if err != nil {
 				return nil, err
@@ -120,6 +132,8 @@ func buildProfile(
 	keep int,
 	healthcheckURLRef string,
 	healthcheckBindingPath string,
+	beforeInv []string,
+	afterInv []string,
 ) (map[string]any, error) {
 	repo, err := repositoryURL(in.Storage, pathSuffix)
 	if err != nil {
@@ -133,6 +147,12 @@ func buildProfile(
 	}
 	if len(in.Archive.Excludes) > 0 {
 		backup["exclude"] = append([]string(nil), in.Archive.Excludes...)
+	}
+	if len(beforeInv) > 0 {
+		backup["run-before"] = append([]string(nil), beforeInv...)
+	}
+	if len(afterInv) > 0 {
+		backup["run-after"] = append([]string(nil), afterInv...)
 	}
 	onSuccess := defaultBool(in.Notifiers.OnSuccess, true)
 	onFailure := defaultBool(in.Notifiers.OnFailure, true)

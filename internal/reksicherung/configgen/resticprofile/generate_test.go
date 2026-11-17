@@ -160,6 +160,70 @@ func TestGenerateIsDeterministic(t *testing.T) {
 	}
 }
 
+func TestGenerateEmitsHooks(t *testing.T) {
+	in := archiveInput()
+	in.Hooks = input.Hooks{
+		RunBefore: input.StringList{`sqlpackage /Action:Export /TargetFile:"C:\backups\app.bacpac"`},
+		RunAfter:  input.StringList{`del /f /q "C:\backups\app.bacpac"`},
+	}
+	in.Archive = &input.Archive{Includes: []string{`C:\backups\app.bacpac`}}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	backup := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "service_name"), "backup")
+	assertEqual(t, backup, "source", []any{`C:\backups\app.bacpac`})
+	assertEqual(t, backup, "run-before", []any{"powershell -NoProfile -ExecutionPolicy Bypass -File service_name-run-before.ps1"})
+	assertEqual(t, backup, "run-after", []any{"powershell -NoProfile -ExecutionPolicy Bypass -File service_name-run-after.ps1"})
+	if _, ok := backup["send-before"]; !ok {
+		t.Fatal("expected healthcheck send-before to remain")
+	}
+	if len(result.Sidecars) != 2 {
+		t.Fatalf("sidecars = %#v", result.Sidecars)
+	}
+	byName := map[string]string{}
+	for _, sc := range result.Sidecars {
+		byName[sc.Name] = string(sc.Content)
+	}
+	before := byName["service_name-run-before.ps1"]
+	if !strings.Contains(before, `$ErrorActionPreference = 'Stop'`) {
+		t.Fatalf("before script = %q", before)
+	}
+	if !strings.Contains(before, `cmd.exe /c 'sqlpackage /Action:Export /TargetFile:"C:\backups\app.bacpac"'`) {
+		t.Fatalf("before script missing wrapped command: %q", before)
+	}
+	if !strings.Contains(before, "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }") {
+		t.Fatalf("before script missing exit check: %q", before)
+	}
+	after := byName["service_name-run-after.ps1"]
+	if !strings.Contains(after, `cmd.exe /c 'del /f /q "C:\backups\app.bacpac"'`) {
+		t.Fatalf("after script = %q", after)
+	}
+}
+
+func TestGenerateWrapsPOSIXHooksAsShellScripts(t *testing.T) {
+	in := archiveInput()
+	in.Hooks = input.Hooks{
+		RunBefore: input.StringList{`pg_dump -f /var/backups/app.dump app`},
+	}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	backup := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "service_name"), "backup")
+	assertEqual(t, backup, "run-before", []any{"sh service_name-run-before.sh"})
+	if len(result.Sidecars) != 1 || result.Sidecars[0].Name != "service_name-run-before.sh" {
+		t.Fatalf("sidecars = %#v", result.Sidecars)
+	}
+	body := string(result.Sidecars[0].Content)
+	if !strings.HasPrefix(body, "#!/bin/sh\n") || !strings.Contains(body, "set -eu\n") {
+		t.Fatalf("sh script = %q", body)
+	}
+	if !strings.Contains(body, `pg_dump -f /var/backups/app.dump app`) {
+		t.Fatalf("sh script missing command: %q", body)
+	}
+}
+
 func TestGenerateAzureAccountKey(t *testing.T) {
 	in := archiveInput()
 	in.Storage = input.Storage{

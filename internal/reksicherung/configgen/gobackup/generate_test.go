@@ -94,6 +94,29 @@ databases:
 	})
 }
 
+func TestGenerateEmitsBeforeAfterScripts(t *testing.T) {
+	in, err := input.Decode(strings.NewReader(`project: {name: hooked}
+storage: {type: s3, bucket: backups}
+schedules: {cron: "0 5 * * *", healthcheck_url_ref: ` + healthRef + `}
+archive: {includes: ["/var/lib/app"]}
+hooks:
+  run_before:
+    - "echo before-1"
+    - "echo before-2"
+  run_after: "echo after"
+`))
+	if err != nil {
+		t.Fatalf("Decode() error = %v", err)
+	}
+	result, err := Generate(in)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+	model := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "models"), "hooked_default")
+	assertEqual(t, model, "before_script", "echo before-1\necho before-2")
+	assertEqual(t, model, "after_script", "echo after")
+}
+
 func TestGenerateMySQLDefaultsPort(t *testing.T) {
 	for _, test := range []struct {
 		name     string

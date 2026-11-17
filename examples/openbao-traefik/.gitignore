@@ -1,0 +1,4 @@
+.env
+openbao-init.json
+*.key
+acme.json
