@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,6 +108,26 @@ encryption:
 	if err := os.WriteFile(inPath, []byte(inputYAML), 0o600); err != nil {
 		t.Fatalf("WriteFile input: %v", err)
 	}
+
+	secrets := map[string]string{
+		"/v1/secret/data/reksicherung/object-store": `{"data":{"data":{"access-key":"AKIA_TEST","secret-key":"SECRET_TEST"}}}`,
+		"/v1/secret/data/reksicherung/healthchecks": `{"data":{"data":{"url":"https://hc.example/check"}}}`,
+		"/v1/secret/data/reksicherung/encryption":   `{"data":{"data":{"password":"restic-pass"}}}`,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := secrets[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, body)
+	}))
+	defer server.Close()
+	t.Setenv("REKSICHERUNG_OPENBAO_ADDR", server.URL)
+	t.Setenv("REKSICHERUNG_OPENBAO_TOKEN", "test-token")
+	t.Setenv("REKSICHERUNG_OPENBAO_PLAINTEXT", "1")
+
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
 		"configgen", "-provider", "resticprofile",
@@ -113,12 +136,20 @@ encryption:
 	if err != nil {
 		t.Fatalf("configgen error = %v stderr=%q", err, stderr.String())
 	}
-	out, err := os.ReadFile(outPath)
+	safePath, unsafePath := configgenOutputPaths(outPath)
+	safeOut, err := os.ReadFile(safePath)
 	if err != nil {
-		t.Fatalf("read out: %v", err)
+		t.Fatalf("read safe out: %v", err)
 	}
-	if !strings.Contains(string(out), "version:") || !strings.Contains(string(out), "RESTIC_PASSWORD") {
-		t.Fatalf("unexpected output: %s", out)
+	if !strings.Contains(string(safeOut), "version:") || !strings.Contains(string(safeOut), "$REKSICHERUNG_ENCRYPTION_PASSWORD") {
+		t.Fatalf("unexpected safe output: %s", safeOut)
+	}
+	unsafeOut, err := os.ReadFile(unsafePath)
+	if err != nil {
+		t.Fatalf("read unsafe out: %v", err)
+	}
+	if !strings.Contains(string(unsafeOut), "restic-pass") || strings.Contains(string(unsafeOut), "$REKSICHERUNG_") {
+		t.Fatalf("unexpected unsafe output: %s", unsafeOut)
 	}
 	bindings, err := os.ReadFile(bindingsPath)
 	if err != nil {
@@ -126,6 +157,16 @@ encryption:
 	}
 	if !strings.Contains(string(bindings), "REKSICHERUNG_ENCRYPTION_PASSWORD") {
 		t.Fatalf("bindings = %s", bindings)
+	}
+}
+
+func TestConfiggenOutputPaths(t *testing.T) {
+	safe, unsafe := configgenOutputPaths(filepath.Join("out", "restic.yml"))
+	if !strings.HasSuffix(safe, filepath.Join("out", "restic.safe.yml")) {
+		t.Fatalf("safe = %q", safe)
+	}
+	if !strings.HasSuffix(unsafe, filepath.Join("out", "restic.unsafe.yml")) {
+		t.Fatalf("unsafe = %q", unsafe)
 	}
 }
 

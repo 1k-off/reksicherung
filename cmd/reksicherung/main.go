@@ -59,7 +59,7 @@ Usage:
   reksicherung validate  -config <catalog.yaml>
   reksicherung validate  -config <catalog.yaml> -production
   reksicherung catalog   -config <catalog.yaml> [-source-ref <relative-path>] [-production]
-  reksicherung configgen -provider gobackup|resticprofile -in <input.yaml> -out <output.yml> [-bindings <bindings.json>]
+  reksicherung configgen -provider gobackup|resticprofile -in <input.yaml> -out <base.yml> [-bindings <bindings.json>]
   reksicherung openbao   health|kv|approle …
   reksicherung hold      -registry <runs.db> -run-id <id> -database-type sqlserver|mysql -verdict pass|fail|inconclusive
   reksicherung cleanup   -registry <runs.db> -run-id <held-run>
@@ -69,7 +69,7 @@ Usage:
 Commands:
   validate   Validate a versioned backup catalog
   catalog    Write the secret-free backup inventory as JSON to stdout
-  configgen  Render GoBackup or resticprofile YAML from I-CONFIGGEN input
+  configgen  Render GoBackup or resticprofile YAML (safe placeholders + unsafe OpenBao-resolved)
   openbao    Provision/verify OpenBao KV and per-source AppRoles
   hold       Register a hold_for_review run with its database type (required for cleanup routing)
   cleanup    Drop a hold_for_review run-scoped database (services stay running)
@@ -78,6 +78,7 @@ Commands:
 The -production flag requires HTTPS for configured storage endpoints when used.
 cleanup/reconcile require SQL Server and OpenBao environment variables used by
 the restore MCP; they drop databases only and leave operator services untouched.
-configgen never resolves secret references; wire bindings at runtime via token
-or AppRole (BAO_ROLE_ID / BAO_SECRET_ID) on the backup host.`)
+configgen writes <base>.safe.yml (placeholders) and <base>.unsafe.yml (secrets
+resolved from OpenBao via REKSICHERUNG_OPENBAO_ADDR/TOKEN). Prefer safe + runtime
+AppRole on hosts; treat unsafe as local/operator-only (mode 0600, never commit).`)
 }

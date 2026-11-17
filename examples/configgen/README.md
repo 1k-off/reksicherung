@@ -26,14 +26,15 @@ Skip this folder if backups already exist — go to
 From the repository root (after `go build` / installed `reksicherung` CLI):
 
 ```bash
-# GoBackup → gobackup.yml + bindings
+# Needs OpenBao env for the unsafe file:
+#   REKSICHERUNG_OPENBAO_ADDR + REKSICHERUNG_OPENBAO_TOKEN
+# Writes /tmp/gobackup.safe.yml + /tmp/gobackup.unsafe.yml (+ bindings)
 reksicherung configgen \
   -provider gobackup \
   -in examples/configgen/gobackup-mssql-s3.yaml \
   -out /tmp/gobackup.yml \
   -bindings /tmp/bindings.json
 
-# resticprofile → resticprofile YAML + bindings (needs encryption.password_ref)
 reksicherung configgen \
   -provider resticprofile \
   -in examples/configgen/resticprofile-sqlbak-s3.yaml \
@@ -41,19 +42,10 @@ reksicherung configgen \
   -bindings /tmp/bindings.json
 ```
 
-Or:
-
-```bash
-go run ./cmd/reksicherung configgen -provider gobackup \
-  -in examples/configgen/gobackup-mssql-s3.yaml \
-  -out /tmp/gobackup.yml \
-  -bindings /tmp/bindings.json
-```
-
-Generated YAML must contain `$REKSICHERUNG_*` placeholders only — never resolved
-secrets. Wire `bindings.json` env names to OpenBao **at runtime on the backup
-host** (token or AppRole → short-lived token → `kv get`). Configgen never bakes
-secret values into YAML.
+- **`*.safe.yml`** — `$REKSICHERUNG_*` placeholders; deploy this and resolve at
+  runtime (token or AppRole → `kv get`).
+- **`*.unsafe.yml`** — secrets already substituted from OpenBao (`0600`);
+  local/operator use only — never commit.
 
 Optional `hooks.run_before` / `hooks.run_after` map to GoBackup
 `before_script`/`after_script`, and for resticprofile to **sidecar scripts**
@@ -65,7 +57,7 @@ operator-owned (hooks + `archive.includes`); `databases[]` stays GoBackup-only.
 
 ## After render
 
-1. Deploy provider YAML to the backup host (operator-owned).
+1. Deploy **`*.safe.yml`** (not unsafe) to the backup host; wire bindings at runtime.
 2. Ensure every `openbao://…#key` in the input exists in OpenBao.
 3. Register the same storage for restore-check:
    [`reksicherung-add-source`](../../.agents/skills/reksicherung-add-source/SKILL.md)
