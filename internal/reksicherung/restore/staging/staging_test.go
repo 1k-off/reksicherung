@@ -37,6 +37,35 @@ func TestSaveAndOpenKeepsOpaqueArtifact(t *testing.T) {
 	}
 }
 
+func TestSaveAndOpenSQLKind(t *testing.T) {
+	store, err := New(t.TempDir(), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := store.Save(context.Background(), io.NopCloser(strings.NewReader("CREATE TABLE t(i INT);")), KindSQL)
+	if err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if artifact.Kind != KindSQL {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+	file, opened, err := store.Open(artifact.ID, KindSQL)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil || string(data) != "CREATE TABLE t(i INT);" || opened != artifact {
+		t.Fatalf("opened artifact = %q, %#v, %v", data, opened, err)
+	}
+	if _, _, err := store.Open(artifact.ID, KindBAK); !errors.Is(err, ErrInvalidID) {
+		t.Fatalf("Open(wrong kind) error = %v, want ErrInvalidID", err)
+	}
+	if _, err := store.Save(context.Background(), io.NopCloser(strings.NewReader("x")), "mysql"); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("Save(unknown kind) error = %v, want ErrInvalidConfig", err)
+	}
+}
+
 func TestNewRequiresPrecreatedNonSymlinkDirectory(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "not-created")
 	if _, err := New(missing, 10); !errors.Is(err, ErrInvalidConfig) {

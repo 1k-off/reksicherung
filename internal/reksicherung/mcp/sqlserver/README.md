@@ -15,6 +15,11 @@ database. Database, schema, table, and column names are quoted SQL Server
 identifiers (including escaped closing brackets); predicate values and
 metadata filters are bound parameters.
 
+MCP tool servers additionally protocol-encode identifier strings in model-facing
+output (`internal/reksicherung/mcp/protocol`): only `[A-Za-z_][A-Za-z0-9_]*`
+literals are emitted plain; everything else becomes an opaque `b64:` token so
+crafted backup names cannot be surfaced as natural-language instructions.
+
 ## Query boundary and limits
 
 `Validate` does not accept SQL text. It constructs one parameterized `SELECT`

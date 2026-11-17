@@ -3,6 +3,10 @@
 Human copy-paste for `examples/compose/`. Skills and AI prompts should point here
 instead of inventing OpenBao/SQL steps.
 
+**Working directory:** after `cd examples/compose` in §1, every command in this
+runbook runs from `examples/compose` (`docker compose --env-file .env …`). Steps
+that need the repository root say so explicitly.
+
 **Related:** [`docs/getting-started.md`](../../docs/getting-started.md) ·
 [`docs/schemas/openbao-source-kv.md`](../../docs/schemas/openbao-source-kv.md) ·
 [`.env.example`](.env.example)
@@ -88,12 +92,12 @@ developing this repository (see bootstrap skill “Developers only”).
 
 ```bash
 TAG="${REKSICHERUNG_IMAGE_TAG:-latest}"   # optional; also set in .env
-for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect cli; do
+for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect \
+         mcp-mysql-restore mcp-mysql-inspect cli; do
   docker pull "ghcr.io/1k-off/reksicherung/${i}:${TAG}"
 done
 
-docker compose -f examples/compose/docker-compose.yml --env-file examples/compose/.env \
-  up -d openbao sqlserver cleanup-reconciler
+docker compose --env-file .env up -d openbao sqlserver cleanup-reconciler
 
 # Restore MCP runs as uid 65532; volume is often root-owned after first SQL start
 docker run --rm -v reksicherung_sql-backup:/var/opt/mssql/backup alpine \
@@ -102,7 +106,8 @@ docker run --rm -v reksicherung_sql-backup:/var/opt/mssql/backup alpine \
 
 `cleanup-reconciler` uses `ghcr.io/1k-off/reksicherung/cli:$TAG`. MCP hosts
 normally run GHCR images via `docker run -i` ([`docs/mcp-clients.md`](../../docs/mcp-clients.md));
-compose profile `mcp-stdio` is optional.
+compose profile `mcp-stdio` is optional. MySQL services use the separate opt-in
+profile `mysql` (see §6b).
 
 Host SQL port in this compose file: `127.0.0.1:11433` → container `1433`.
 Inside the compose network always use `HOST=sqlserver` and port `1433`.
@@ -125,6 +130,50 @@ docker compose --env-file .env exec -T \
 
 Changing `.env` later does **not** change the SA password already stored in the
 SQL data volume.
+
+## 6b. Optional: MySQL restore target (`database.type: mysql`)
+
+Skip unless a catalog source uses `database.type: mysql` (logical
+`.sql` / `.sql.gz` dumps). MySQL is **opt-in via compose profile `mysql`**:
+`mysql`, `mysql-restore-mcp` and `mysql-inspect-mcp` are not started by plain
+`docker compose up` (and do not need `MYSQL_ROOT_PASSWORD`). Uncomment and set
+`MYSQL_ROOT_PASSWORD` in `.env` (no `$`, `&`, `%`), then:
+
+```bash
+docker compose --env-file .env --profile mysql up -d mysql
+```
+
+Create a restore account limited to run-scoped databases (never grant `FILE`,
+`SUPER`, or access to other schemas):
+
+```sql
+CREATE USER 'reksicherung_restore'@'%' IDENTIFIED BY 'SameAsOpenBaoPassword_123';
+GRANT ALL PRIVILEGES ON `reksicherung\_%`.* TO 'reksicherung_restore'@'%';
+```
+
+Run it as root inside the container (wait for the healthcheck first):
+
+```bash
+docker compose --env-file .env --profile mysql exec mysql \
+  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
+# paste the two statements above, then exit
+```
+
+Seed OpenBao (inside the compose network the host is `mysql`, port `3306`):
+
+```bash
+docker compose --env-file .env exec -T \
+  -e BAO_ADDR=http://127.0.0.1:8200 \
+  -e BAO_TOKEN \
+  openbao bao kv put secret/reksicherung/mysql \
+  HOST=mysql \
+  PORT=3306 \
+  USERNAME=reksicherung_restore \
+  PASSWORD='SameAsOpenBaoPassword_123'
+```
+
+`cleanup-reconciler` drops held/expired MySQL run databases with the `mysql`
+client bundled in the `cli` image, using this same secret.
 
 ## 7. Optional: dedicated restore login
 
@@ -172,12 +221,12 @@ bao kv put secret/reksicherung/sources/demo-app-a \
 ## 9. Catalog validate
 
 ```bash
-# With a local Go toolchain from repo root:
-go run ./cmd/reksicherung validate -config examples/catalog.example.yaml
-go run ./cmd/reksicherung catalog -config examples/catalog.example.yaml
+# With a local Go toolchain (subshell runs from the repo root, CWD unchanged):
+(cd ../.. && go run ./cmd/reksicherung validate -config examples/catalog.example.yaml)
+(cd ../.. && go run ./cmd/reksicherung catalog -config examples/catalog.example.yaml)
 
-# Or GHCR CLI (mount your catalog):
-docker run --rm -v "$PWD/examples:/examples:ro" \
+# Or GHCR CLI (mount the repo examples/ directory, i.e. ..):
+docker run --rm -v "$PWD/..:/examples:ro" \
   ghcr.io/1k-off/reksicherung/cli:latest \
   validate -config /examples/catalog.example.yaml
 ```
@@ -199,6 +248,10 @@ Shared mounts required between provider + restore MCP:
 - `reksicherung_artifact-stage` → `/var/lib/reksicherung/artifacts`
 - `reksicherung_sql-backup` → `/var/opt/mssql/backup` (restore + SQL Server)
 
+MySQL (`mcp-mysql-restore`, `mcp-mysql-inspect`) needs only
+`reksicherung_artifact-stage` (restore) and no `sql-backup` volume; inspect
+needs no volumes. Pass the restore `run_id` to every inspect call.
+
 Always set `REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts`
 as a **literal** (do not interpolate a Windows host path).
 
@@ -207,12 +260,13 @@ as a **literal** (do not interpolate a Windows host path).
 | Task | Action |
 | --- | --- |
 | After reboot | Unseal OpenBao; `up -d` stack; re-`chmod 1777` sql-backup if volume recreated |
+| hold_for_review register | `reksicherung hold -registry … -run-id … -database-type sqlserver\|mysql -verdict …` (required for held runs; `-database-type` routes the later drop) |
 | hold_for_review drop | `reksicherung cleanup -registry … -run-id …` (skill `reksicherung-operate`) |
 | Triage FAIL | Evidence + OpenBao source KV + inventory; see `docs/operations.md` |
 
 ## Tear down
 
 ```bash
-docker compose --env-file .env --profile mcp-stdio down
+docker compose --env-file .env --profile mcp-stdio --profile mysql down
 # Add -v only when intentionally wiping OpenBao + SQL data
 ```

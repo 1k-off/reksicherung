@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+FROM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+  -o /out/reksicherung-mcp-mysql-restore ./cmd/reksicherung-mcp-mysql-restore \
+  && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" \
+  -o /out/reksicherung ./cmd/reksicherung
+
+FROM debian:bookworm-slim
+USER root
+# default-mysql-client provides the mysql and mysqlcheck binaries.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates default-mysql-client \
+  && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/reksicherung-mcp-mysql-restore /usr/local/bin/reksicherung-mcp-mysql-restore
+COPY --from=build /out/reksicherung /usr/local/bin/reksicherung
+USER 65532:65532
+ENV PATH="/usr/local/bin:${PATH}"
+ENTRYPOINT ["/usr/local/bin/reksicherung-mcp-mysql-restore"]

@@ -1,8 +1,8 @@
 # Reksicherung
 
-Automated backup restoreability checks for SQL Server backups (GoBackup and Restic) stored in S3-compatible object storage or Azure Blob.
+Automated backup restoreability checks for SQL Server backups (`.bak`/`.bacpac`) and MySQL logical dumps (`.sql`/`.sql.gz`), taken with GoBackup or Restic and stored in S3-compatible object storage or Azure Blob.
 
-Reksicherung is a set of MCP servers, skills, catalog utilities, GoBackup/resticprofile config generators, and a durable database-cleanup reconciler. It does **not** create, start, or remove containers. Operators provision MCP services and the SQL Server restore target. Any MCP-capable orchestrator (for example Airon — see `examples/airon/`) or a human operator can drive the restore-check workflow. Airon is not a dependency.
+Reksicherung is a set of MCP servers, skills, catalog utilities, GoBackup/resticprofile config generators, and a durable database-cleanup reconciler. It does **not** create, start, or remove containers. Operators provision MCP services and the SQL Server / MySQL restore target. Any MCP-capable orchestrator (for example Airon — see `examples/airon/`) or a human operator can drive the restore-check workflow. Airon is not a dependency.
 
 Module path: `github.com/1k-off/reksicherung`. Catalog API: `reksicherung.1node.xyz/v1alpha2`.
 
@@ -29,13 +29,17 @@ Module path: `github.com/1k-off/reksicherung`. Catalog API: `reksicherung.1node.
 | `reksicherung-mcp-restic` | Discover/stage files from Restic repos per `source_id` (OpenBao) |
 | `reksicherung-mcp-sqlserver-restore` | Restore staged `.bak`/`.bacpac`; integrity check; drop run-scoped DB |
 | `reksicherung-mcp-sqlserver` | Bounded read-only schema/query tools for AI semantic review |
+| `reksicherung-mcp-mysql-restore` | Restore staged logical `.sql`/`.sql.gz` dumps (kind `sql`); `mysqlcheck` integrity; drop run-scoped DB |
+| `reksicherung-mcp-mysql` | Bounded read-only `mysql_*` inspection tools for semantic review (image `mcp-mysql-inspect`) |
 
 GHCR images (lab tag `latest`; pin digests for production):
-`ghcr.io/1k-off/reksicherung/{mcp-gobackup,mcp-restic,mcp-sqlserver-restore,mcp-sqlserver-inspect,cli}:<TAG>`.
+`ghcr.io/1k-off/reksicherung/{mcp-gobackup,mcp-restic,mcp-sqlserver-restore,mcp-sqlserver-inspect,mcp-mysql-restore,mcp-mysql-inspect,cli}:<TAG>`.
+
+Tool family is chosen by catalog `database.type` (`sqlserver_*` vs `mysql_*`). For both, integrity `command_completed` means only that the check command exited without error — it is **not** a clean-integrity verdict.
 
 ## Operator journey (summary)
 
-1. Compose stack: OpenBao + SQL + reconciler — [`examples/compose/RUNBOOK.md`](examples/compose/RUNBOOK.md).
+1. Compose stack: OpenBao + SQL Server (and/or MySQL) + reconciler — [`examples/compose/RUNBOOK.md`](examples/compose/RUNBOOK.md).
 2. **Optional** backup-as-code: templates in [`examples/configgen/`](examples/configgen/), then `reksicherung configgen` ([`reksicherung-configgen`](.agents/skills/reksicherung-configgen/SKILL.md)).
 3. Thin catalog + OpenBao `sources/<id>` ([`examples/catalog.example.yaml`](examples/catalog.example.yaml), [`reksicherung-add-source`](.agents/skills/reksicherung-add-source/SKILL.md)).
 4. Attach MCP ([`docs/mcp-clients.md`](docs/mcp-clients.md) or Airon) and dry-run ([`reksicherung-restore-check`](.agents/skills/reksicherung-restore-check/SKILL.md)).

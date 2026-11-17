@@ -2,7 +2,7 @@
 name: reksicherung-airon-onboard
 description: >-
   Scaffold and first-run a Reksicherung + Airon lab package (GHCR images, OpenBao,
-  SQL Server, stdio MCP). Runtime-agnostic (docker, podman, nerdctl/cri-compatible
+  SQL Server and/or opt-in MySQL restore targets, stdio MCP). Runtime-agnostic (docker, podman, nerdctl/cri-compatible
   compose) on Windows, Linux, and macOS. Use when onboarding a client/lab for Airon
   restore-checks, generating RUNBOOK/compose/job files, or replacing fragile
   compose-run MCP with `$RUNTIME run`. Distinct from reksicherung-bootstrap
@@ -28,7 +28,8 @@ Related: stack without Airon — `reksicherung-bootstrap` + `docs/getting-starte
 | Runtime | `docker` \| `podman` \| `nerdctl` (or other Compose-compatible CLI) |
 | OS shell | PowerShell (Windows) vs bash/zsh (Linux/macOS) |
 | Catalog | At least one `source_id`; restic needs `backupPath` |
-| Secrets | S3/restic per source + SQL SA → OpenBao (never long-lived in `.env`) |
+| Database engine | `sqlserver` (default) and/or `mysql` per catalog `database.type`; MySQL uses the opt-in compose profile `mysql` |
+| Secrets | S3/restic per source + SQL SA (and MySQL restricted account when used) → OpenBao (never long-lived in `.env`) |
 | LLM | `OPENAI_API_KEY` or Anthropic + provider swap in `job/airon.yaml` |
 | `airon` | On `PATH` or documented binary path |
 
@@ -40,7 +41,8 @@ COMPOSE = "$RUNTIME compose"   # or docker-compose / podman-compose if needed
 ```
 
 Record `RUNTIME`, `COMPOSE_PROJECT`, host SQL port (default **11433** on Windows
-user-mode networking; **1433** often OK on Linux/macOS bridge).
+user-mode networking; **1433** often OK on Linux/macOS bridge). MySQL (opt-in
+profile `mysql`) uses host `13306` → `mysql:3306` only for admin seeding.
 
 Fail closed if no container CLI can pull/run and compose-up.
 
@@ -124,17 +126,28 @@ Use `$RUNTIME` / `$COMPOSE` below; show both bash and PowerShell blocks when the
 target OS is unknown.
 
 1. **Pull** GHCR images (mcp-gobackup, mcp-restic, mcp-sqlserver-restore,
-   mcp-sqlserver-inspect, cli) + `openbao/openbao:2.1.0` +
-   `mcr.microsoft.com/mssql/server:2022-latest`.
+   mcp-sqlserver-inspect, cli; plus mcp-mysql-restore, mcp-mysql-inspect for
+   `database.type: mysql`) + `openbao/openbao:2.1.0` +
+   `mcr.microsoft.com/mssql/server:2022-latest` (and `mysql:8.4` for MySQL).
 2. **Init OpenBao** — `compose up -d openbao` → `bao operator init` (save
    `openbao-init.json`) → unseal → enable `secret/` kv-v2 → write token into
    `compose/.env` as `REKSICHERUNG_OPENBAO_TOKEN`.
 3. **Start stack** — openbao + sqlserver + cleanup-reconciler; then chmod
    sql-backup volume.
+   **If any catalog source has `database.type: mysql`** (MySQL is opt-in, compose
+   profile `mysql`; plain `up` never starts it): set `MYSQL_ROOT_PASSWORD` in
+   `compose/.env`, then `<COMPOSE> --env-file .env --profile mysql up -d mysql`;
+   wait healthy; create the restricted account
+   (grants only on schema pattern `reksicherung\_%` — never `FILE`/`SUPER`/other
+   schemas; see `examples/compose/RUNBOOK.md` §6b). SQL Server-only packs skip
+   this and drop the mysql services from the package compose.
 4. **Seed OpenBao** — `secret/reksicherung/defaults`, `.../sqlserver`
    (`HOST=sqlserver`, `USERNAME=sa`, `PASSWORD=<same as MSSQL_SA_PASSWORD>`),
    and `.../sources/<source_id>` per catalog (see
-   `docs/schemas/openbao-source-kv.md`).
+   `docs/schemas/openbao-source-kv.md`). **MySQL sources:** also seed
+   `.../mysql` (`HOST=mysql`, `PORT=3306`, `USERNAME`/`PASSWORD` = the restricted
+   account from step 3, not root) and keep the `mysql_restore` / `mysql_inspect`
+   servers + tools from the templates; otherwise drop them.
 5. **Validate catalog** (optional) — cli profile `validate` / `catalog`.
 6. **Airon run** — export LLM key + `REKSICHERUNG_OPENBAO_TOKEN`; `cd job`;
    `airon run --config ./airon.yaml --no-healthchecks --input "..."`.
@@ -167,6 +180,7 @@ Substitute these into `job/airon.yaml` MCP args (see `templates/airon-mcp-stdio.
 |---------|--------|
 | `initialize: EOF` on MCP | Confirm `$RUNTIME run` (not compose run), `env_passthrough: true`, token set, no host Windows staging path |
 | `SQL Server restore operation failed` in ~ms | chmod sql-backup 1777; confirm OpenBao sqlserver password matches SA |
+| MySQL restore/inspect connect error | `--profile mysql` service up? OpenBao `secret/reksicherung/mysql` = restricted account (grants on `reksicherung\_%`), `HOST=mysql` |
 | Restic stage invents `/path/to/...` | Require `backupPath=` in input; tighten skill/prompt |
 | GoBackup discovery fails on restic source | Expected; continue with restic |
 | Agent calls skill tool, no MCP | Remove skill from `prompts.tools`; inject via `{{file:}}` |
@@ -180,7 +194,8 @@ Substitute these into `job/airon.yaml` MCP args (see `templates/airon-mcp-stdio.
 ## Done when
 
 - [ ] Package files exist and RUNBOOK matches detected `RUNTIME`/OS
-- [ ] OpenBao unsealed; KV seeded; SQL up
+- [ ] OpenBao unsealed; KV seeded; SQL Server up (and, for MySQL sources: `mysql`
+      profile service healthy, restricted account created, `secret/reksicherung/mysql` seeded)
 - [ ] `airon check --config job/airon.yaml` OK (aside from optional notify URL)
 - [ ] One restore-check reaches restore (or documented PASS/FAIL with real MCP errors)
 - [ ] Coverage path writes `coverage/runs/…` + registry map when used

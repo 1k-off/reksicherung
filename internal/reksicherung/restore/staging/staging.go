@@ -16,6 +16,7 @@ import (
 const (
 	KindBAK    = "bak"
 	KindBACPAC = "bacpac"
+	KindSQL    = "sql"
 	idBytes    = 16
 
 	// DefaultDirectory is used when REKSICHERUNG_ARTIFACT_STAGE_DIR is unset.
@@ -42,6 +43,10 @@ type Artifact struct {
 	Size int64
 }
 
+func validKind(kind string) bool {
+	return kind == KindBAK || kind == KindBACPAC || kind == KindSQL
+}
+
 // New validates an existing stage directory. The operator is responsible for
 // mounting it into the provider and SQL Server MCP services with suitable
 // ownership and permissions.
@@ -57,7 +62,7 @@ func New(directory string, maxBytes int64) (*Store, error) {
 }
 
 // Save copies one already-resolved database artifact to a random opaque ID.
-// kind must be bak or bacpac. The source is always closed.
+// kind must be bak, bacpac, or sql. The source is always closed.
 func (store *Store) Save(ctx context.Context, source io.ReadCloser, kind string) (_ Artifact, returnErr error) {
 	if source == nil {
 		return Artifact{}, ErrInvalidConfig
@@ -67,7 +72,7 @@ func (store *Store) Save(ctx context.Context, source io.ReadCloser, kind string)
 			returnErr = ErrStageFailed
 		}
 	}()
-	if store == nil || ctx == nil || (kind != KindBAK && kind != KindBACPAC) {
+	if store == nil || ctx == nil || !validKind(kind) {
 		return Artifact{}, ErrInvalidConfig
 	}
 	if err := ctx.Err(); err != nil {
@@ -117,7 +122,7 @@ func (store *Store) Save(ctx context.Context, source io.ReadCloser, kind string)
 // Open opens one artifact by opaque ID and validated kind. It rejects links,
 // directories, non-canonical files, and files larger than the store limit.
 func (store *Store) Open(id, kind string) (*os.File, Artifact, error) {
-	if store == nil || !validID(id) || (kind != KindBAK && kind != KindBACPAC) {
+	if store == nil || !validID(id) || !validKind(kind) {
 		return nil, Artifact{}, ErrInvalidID
 	}
 	name := id + "." + kind

@@ -90,6 +90,25 @@ func TestBackupStagerAmbiguousRequiresMemberPath(t *testing.T) {
 	}
 }
 
+func TestBackupStagerStagesSQLDump(t *testing.T) {
+	stageStore, err := staging.New(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stager, err := newBackupStager(&fakeArtifactOpener{data: makeZipMembers(t, map[string][]byte{"db/app.sql": []byte("USE `app`;\n")})},
+		stageStore, artifact.Limits{MaxInputBytes: 1 << 20, MaxExpandedBytes: 1 << 20, MaxTemporaryBytes: 2 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := stager.Stage(context.Background(), "run/archive.zip", "db/app.sql")
+	if err != nil {
+		t.Fatalf("Stage() error = %v", err)
+	}
+	if result.Kind != staging.KindSQL || result.Size != int64(len("USE `app`;\n")) {
+		t.Fatalf("staged = %#v", result)
+	}
+}
+
 type fakeArtifactOpener struct {
 	data   []byte
 	opened string

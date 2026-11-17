@@ -131,8 +131,8 @@ func (backup BackupSource) validate() error {
 	} else if backup.BackupPath != "" {
 		return errors.New("backupPath is only valid for Restic")
 	}
-	if backup.Database.Type != "sqlserver" {
-		return errors.New("database.type must be sqlserver")
+	if backup.Database.Type != "sqlserver" && backup.Database.Type != "mysql" {
+		return errors.New("database.type must be sqlserver or mysql")
 	}
 	if len(backup.Database.Name) > 128 || !validName(backup.Database.Name) {
 		return errors.New("database.name must be a non-empty printable name of at most 128 characters")

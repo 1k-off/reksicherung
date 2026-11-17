@@ -203,6 +203,8 @@ func buildDatabases(databases []input.Database, bindings *input.Binder) map[stri
 		}
 		if database.Port > 0 {
 			entry["port"] = database.Port
+		} else if dbType == "mysql" {
+			entry["port"] = 3306
 		}
 		if database.TrustServerCertificate != nil {
 			entry["trustServerCertificate"] = *database.TrustServerCertificate

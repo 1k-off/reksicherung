@@ -3,7 +3,9 @@
 Package root: `<PACKAGE_PATH>`  
 Runtime: `<RUNTIME>` (`<COMPOSE>` = `<RUNTIME> compose`)  
 Compose project: `<COMPOSE_PROJECT>`  
-Host SQL port: `<SQL_HOST_PORT>` (container always `sqlserver:1433`)
+Host SQL port: `<SQL_HOST_PORT>` (container always `sqlserver:1433`)  
+MySQL (optional, compose profile `mysql`): host `13306` → `mysql:3306`; skip this
+pack's MySQL steps if no catalog source has `database.type: mysql`.
 
 Stack is download/restore-check only. Mutations only against `reksicherung_*` DBs.
 
@@ -56,6 +58,7 @@ Secrets: OpenBao KV, not catalog. Example ids in prompts are fictional
 - Network: GHCR pull; MCP → object storage
 
 Images: `ghcr.io/1k-off/reksicherung/{mcp-gobackup,mcp-restic,mcp-sqlserver-restore,mcp-sqlserver-inspect,cli}:<TAG>`
+(MySQL sources additionally: `mcp-mysql-restore`, `mcp-mysql-inspect`, and `mysql:8.4`)
 
 ## Setup
 
@@ -70,7 +73,7 @@ cd <PACKAGE_PATH>/compose
 
 ```bash
 cd <PACKAGE_PATH>/compose
-cp -n .env.example .env   # set MSSQL_SA_PASSWORD (no $ & %)
+cp -n .env.example .env   # set MSSQL_SA_PASSWORD (no $ & %); MYSQL_ROOT_PASSWORD only if MySQL
 <COMPOSE> --env-file .env up -d openbao
 # wait until process listens on 8200
 <COMPOSE> --env-file .env exec -T openbao bao operator init \
@@ -89,11 +92,33 @@ Keep `openbao-init.json` secret; gitignore it.
   chmod 1777 /var/opt/mssql/backup
 ```
 
+### Start MySQL + restricted account (only if MySQL sources)
+
+MySQL is opt-in (compose profile `mysql`); plain `up` never starts it. Set
+`MYSQL_ROOT_PASSWORD` in `.env` (no `$ & %`), then:
+
+```bash
+<COMPOSE> --env-file .env --profile mysql up -d mysql
+# wait until healthy, then as root inside the container:
+<COMPOSE> --env-file .env --profile mysql exec mysql \
+  sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD"'
+```
+
+```sql
+CREATE USER 'reksicherung_restore'@'%' IDENTIFIED BY '<MYSQL_RESTORE_PASSWORD>';
+GRANT ALL PRIVILEGES ON `reksicherung\_%`.* TO 'reksicherung_restore'@'%';
+```
+
+Never grant `FILE`, `SUPER`, or access to other schemas.
+
 ### Seed OpenBao
 
 Write `secret/reksicherung/defaults`, `secret/reksicherung/sqlserver`
 (`HOST=sqlserver`, `USERNAME=sa`, `PASSWORD=<MSSQL_SA_PASSWORD>`), and per-source
-KV. Schema: `docs/schemas/openbao-source-kv.md`.
+KV. Schema: `docs/schemas/openbao-source-kv.md`. MySQL sources: also
+`secret/reksicherung/mysql` (`HOST=mysql`, `PORT=3306`,
+`USERNAME=reksicherung_restore`, `PASSWORD=<MYSQL_RESTORE_PASSWORD>` — the
+restricted account above, never root).
 
 ### Optional catalog validate
 
@@ -154,7 +179,7 @@ airon run --config .\airon-catalog-sweep.yaml --no-healthchecks `
 
 ## Schedule (Task Scheduler / cron)
 
-Assumption: **OpenBao + SQL Server (+ reconciler) run separately** (compose /
+Assumption: **OpenBao + SQL Server (+ MySQL if used) + reconciler run separately** (compose /
 systemd / ops). Cron / Task Scheduler only starts **Airon** with the catalog-
 sweep prompt — it does not start or unseal the support stack.
 
@@ -185,7 +210,7 @@ Outputs: `logs/run-*.json`, `outputs/catalog_sweep.md`, `coverage/runs/…`,
 
 ## Day-2
 
-- After reboot: unseal OpenBao; `up -d` stack; re-chmod sql-backup if volume recreated.
+- After reboot: unseal OpenBao; `up -d` stack (add `--profile mysql` if MySQL is used); re-chmod sql-backup if volume recreated.
 - Triage: `logs/run-*.json` tool errors; `coverage/runs/…` for DB name map;
   see `reference-pitfalls.md`.
 - Month-end: count distinct `last_checked_at` in month vs `monthly_min`.
@@ -194,6 +219,6 @@ Outputs: `logs/run-*.json`, `outputs/catalog_sweep.md`, `coverage/runs/…`,
 
 ```bash
 cd compose
-<COMPOSE> --env-file .env --profile mcp-stdio --profile cli down
+<COMPOSE> --env-file .env --profile mcp-stdio --profile mysql --profile cli down
 # add -v only when wiping OpenBao + SQL data intentionally
 ```

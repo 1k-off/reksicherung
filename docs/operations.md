@@ -12,8 +12,11 @@
    `secret/reksicherung/defaults`, per-source KV, and
    `secret/reksicherung/sqlserver` (`HOST`/`USERNAME`/`PASSWORD`, optional
    `PORT`) per `docs/schemas/openbao-source-kv.md`.
-4. Deploy an isolated SQL Server restore instance on a network that cannot reach
-   production databases; create a dedicated restore login matching OpenBao.
+4. Deploy an isolated SQL Server restore instance (and/or MySQL for
+   `database.type: mysql`) on a network that cannot reach production databases;
+   create a dedicated restore login/account matching OpenBao
+   (`secret/reksicherung/sqlserver` / `secret/reksicherung/mysql`). The MySQL
+   account must be limited to `reksicherung\_%` databases (no `FILE`/`SUPER`).
 5. Mount shared artifact and backup volumes into provider + restore MCP processes.
 6. Run `cleanup-reconciler` continuously against the run registry volume.
 7. Point any orchestrator (or manual operator workflow) at MCP servers with
@@ -54,14 +57,27 @@ for the process lifetime and restart processes on rotation.
 | Mode | Behavior |
 | --- | --- |
 | `delete` | Drop run-scoped DB after the run; reconciler retries on lease expiry |
-| `hold_for_review` | Keep DB; operator runs `reksicherung cleanup` |
+| `hold_for_review` | Keep DB; register with `reksicherung hold -database-type sqlserver\|mysql`, later `reksicherung cleanup` |
 
-Reconciler never stops SQL Server or MCP services. Failed cleanup is visible in
+A held run **must** be registered with `reksicherung hold` (explicit
+`-database-type`); a record without `database_type` is treated as `sqlserver`.
+
+Reconciler routes drops by the recorded `database_type` (`sqlserver` via
+`sqlcmd`, `mysql` via the `mysql` client; both in the `cli` image) and never
+stops SQL Server, MySQL, or MCP services. Failed cleanup is visible in
 registry status and stderr; it is not reported as a clean PASS.
+
+## Integrity wording
+
+`command_completed` from `sqlserver_check_restore_integrity` /
+`mysql_check_restore_integrity` (and the inspect `*_check_integrity` tools)
+means only that the fixed check command exited without error. It is not a
+clean-integrity verdict; evidence and reports should say "check completed",
+never "clean", and a failed or skipped check is `FAIL`/`INCONCLUSIVE`.
 
 ## hold_for_review access
 
-- Restrict SQL Server network to operator jump hosts / break-glass identities.
+- Restrict SQL Server / MySQL network to operator jump hosts / break-glass identities.
 - Record retained database name (`reksicherung_<hash>`) in evidence.
 - Set an organizational TTL (recommended ≤ 7 days) and track via tickets.
 - Drop with `reksicherung cleanup -registry ... -run-id ...` after review.
@@ -69,6 +85,6 @@ registry status and stderr; it is not reported as a clean PASS.
 ## Image provenance
 
 - Development may use mutable tags (`2022-latest`).
-- Production: pin digest for SQL Server, OpenBao, and Reksicherung images.
+- Production: pin digest for SQL Server, MySQL, OpenBao, and Reksicherung images.
 - Rebuild MCP images on dependency CVEs; keep SqlPackage/sqlcmd/restic versions
   recorded in image labels or release notes.

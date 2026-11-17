@@ -40,6 +40,31 @@ func TestDecodeValidCatalog(t *testing.T) {
 	}
 }
 
+func TestDecodeMySQLCatalog(t *testing.T) {
+	raw := strings.Replace(validCatalogYAML, "type: sqlserver", "type: mysql", 1)
+	catalog, err := Decode([]byte(raw))
+	if err != nil {
+		t.Fatalf("Decode(mysql) error = %v", err)
+	}
+	if got := catalog.Backups[0].Database.Type; got != "mysql" {
+		t.Fatalf("database.type = %q", got)
+	}
+	raw = strings.Replace(validCatalogYAML, "type: sqlserver", "type: postgres", 1)
+	if _, err := Decode([]byte(raw)); err == nil {
+		t.Fatal("Decode(postgres) succeeded, want rejection")
+	}
+}
+
+func TestDecodeMySQLFixtureCatalog(t *testing.T) {
+	data, err := os.ReadFile("../../../docs/schemas/fixtures/valid/catalog.mysql-source.yaml")
+	if err != nil {
+		t.Fatalf("ReadFile(fixture) error = %v", err)
+	}
+	if _, err := Decode(data); err != nil {
+		t.Fatalf("Decode(fixture) error = %v", err)
+	}
+}
+
 func TestDecodeRepositoryExampleCatalog(t *testing.T) {
 	data, err := os.ReadFile("../../../examples/catalog.example.yaml")
 	if err != nil {

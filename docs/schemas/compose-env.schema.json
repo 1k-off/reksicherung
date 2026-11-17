@@ -12,6 +12,11 @@
   ],
   "properties": {
     "MSSQL_SA_PASSWORD": { "type": "string", "minLength": 8 },
+    "MYSQL_ROOT_PASSWORD": {
+      "type": "string",
+      "minLength": 8,
+      "description": "Optional; only when enabling the opt-in compose profile `mysql` (database.type=mysql). Connection used by MCP lives in OpenBao secret/reksicherung/mysql."
+    },
     "REKSICHERUNG_OPENBAO_ADDR": { "type": "string" },
     "REKSICHERUNG_OPENBAO_TOKEN": { "type": "string", "minLength": 1 },
     "REKSICHERUNG_IMAGE_TAG": {

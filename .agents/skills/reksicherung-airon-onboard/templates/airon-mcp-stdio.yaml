@@ -105,3 +105,47 @@ mcp_servers:
       - ghcr.io/1k-off/reksicherung/mcp-sqlserver-inspect:IMAGE_TAG
     env_passthrough: true
     timeout: 45m
+
+  # MySQL (database.type=mysql) — omit both servers if no MySQL sources.
+  # Tools: mysql_restore__mysql_restore_backup, mysql_inspect__mysql_list_tables, ...
+  - name: mysql_restore
+    transport: stdio
+    command: RUNTIME
+    args:
+      - run
+      - --rm
+      - -i
+      - --network
+      - COMPOSE_PROJECT_reksicherung
+      - -e
+      - REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200
+      - -e
+      - REKSICHERUNG_OPENBAO_PLAINTEXT=1
+      - -e
+      - REKSICHERUNG_OPENBAO_TOKEN=${REKSICHERUNG_OPENBAO_TOKEN}
+      - -e
+      - REKSICHERUNG_ARTIFACT_STAGE_DIR=/var/lib/reksicherung/artifacts
+      - -v
+      - COMPOSE_PROJECT_artifact-stage:/var/lib/reksicherung/artifacts
+      - ghcr.io/1k-off/reksicherung/mcp-mysql-restore:IMAGE_TAG
+    env_passthrough: true
+    timeout: 45m
+
+  - name: mysql_inspect
+    transport: stdio
+    command: RUNTIME
+    args:
+      - run
+      - --rm
+      - -i
+      - --network
+      - COMPOSE_PROJECT_reksicherung
+      - -e
+      - REKSICHERUNG_OPENBAO_ADDR=http://openbao:8200
+      - -e
+      - REKSICHERUNG_OPENBAO_PLAINTEXT=1
+      - -e
+      - REKSICHERUNG_OPENBAO_TOKEN=${REKSICHERUNG_OPENBAO_TOKEN}
+      - ghcr.io/1k-off/reksicherung/mcp-mysql-inspect:IMAGE_TAG
+    env_passthrough: true
+    timeout: 45m

@@ -54,6 +54,36 @@ services:
           cpus: "2.0"
           memory: 4G
 
+  # Isolated MySQL restore target (logical .sql/.sql.gz dumps). OPT-IN: behind
+  # compose profile `mysql`, so plain `docker compose up` never starts it and
+  # never needs MYSQL_ROOT_PASSWORD. Use `--profile mysql` when a catalog
+  # source has database.type=mysql. The restore MCP creates
+  # reksicherung_<hash> databases here; the account must be limited to
+  # reksicherung\_% (see cmd/reksicherung-mcp-mysql-restore/README.md).
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    ports:
+      # Host-only admin access for lab seeding; inside compose use mysql:3306.
+      - "127.0.0.1:13306:3306"
+    networks: [reksicherung]
+    restart: unless-stopped
+    profiles: ["mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
   gobackup-mcp:
     image: ghcr.io/1k-off/reksicherung/mcp-gobackup:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
@@ -133,6 +163,45 @@ services:
     profiles: ["mcp-stdio"]
     depends_on: [sqlserver, openbao]
 
+  mysql-restore-mcp:
+    image: ghcr.io/1k-off/reksicherung/mcp-mysql-restore:${REKSICHERUNG_IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mysql-restore
+    pull_policy: missing
+    environment:
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      REKSICHERUNG_ARTIFACT_STAGE_DIR: ${REKSICHERUNG_ARTIFACT_STAGE_DIR:-/var/lib/reksicherung/artifacts}
+      REKSICHERUNG_ARTIFACT_MAX_BYTES: ${REKSICHERUNG_ARTIFACT_MAX_BYTES:-214748364800}
+    volumes:
+      # Logical dumps are streamed from the staged artifact; no shared DB volume.
+      - artifact-stage:/var/lib/reksicherung/artifacts
+    networks: [reksicherung]
+    stdin_open: true
+    restart: unless-stopped
+    # `mysql` profile only (not mcp-stdio): depends_on mysql, itself opt-in.
+    profiles: ["mysql"]
+    depends_on: [mysql, openbao]
+
+  mysql-inspect-mcp:
+    image: ghcr.io/1k-off/reksicherung/mcp-mysql-inspect:${REKSICHERUNG_IMAGE_TAG:-latest}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.mysql-inspect
+    pull_policy: missing
+    environment:
+      REKSICHERUNG_OPENBAO_ADDR: http://openbao:8200
+      REKSICHERUNG_OPENBAO_PLAINTEXT: "1"
+      REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
+      # Unset: every tool call must pass the restore run_id (recommended).
+    networks: [reksicherung]
+    stdin_open: true
+    restart: unless-stopped
+    profiles: ["mysql"]
+    depends_on: [mysql, openbao]
+
   cleanup-reconciler:
     image: ghcr.io/1k-off/reksicherung/cli:${REKSICHERUNG_IMAGE_TAG:-latest}
     build:
@@ -147,6 +216,8 @@ services:
       REKSICHERUNG_OPENBAO_TOKEN: ${REKSICHERUNG_OPENBAO_TOKEN}
       REKSICHERUNG_SQLSERVER_BACKUP_DIR: ${REKSICHERUNG_SQLSERVER_BACKUP_DIR:-/var/opt/mssql/backup}
       REKSICHERUNG_SQLSERVER_DATA_DIR: ${REKSICHERUNG_SQLSERVER_DATA_DIR:-/var/opt/mssql/data}
+      # database_type=mysql held/expired runs are dropped via the mysql client in
+      # the cli image, using secret/reksicherung/mysql (reachable as mysql:3306).
     volumes:
       - run-registry:/var/lib/reksicherung/runs
       - sql-backup:/var/opt/mssql/backup
@@ -162,5 +233,6 @@ volumes:
   openbao-data:
   sql-data:
   sql-backup:
+  mysql-data:
   artifact-stage:
   run-registry:

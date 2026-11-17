@@ -22,7 +22,7 @@ type resticArtifactStager struct {
 
 type resticStagedArtifact struct {
 	ArtifactID string `json:"artifact_id" jsonschema:"Opaque ID for the resolved artifact; pass to the SQL Server restore MCP tool."`
-	Kind       string `json:"kind" jsonschema:"Resolved artifact kind: bak or bacpac."`
+	Kind       string `json:"kind" jsonschema:"Resolved artifact kind: bak, bacpac, or sql."`
 	Size       int64  `json:"size" jsonschema:"Resolved artifact size in bytes."`
 	SnapshotID string `json:"snapshot_id" jsonschema:"Selected full snapshot ID."`
 }
@@ -49,8 +49,11 @@ func (stager *resticArtifactStager) Stage(ctx context.Context, snapshotID, backu
 		return resticStagedArtifact{}, errors.New("selected Restic file does not contain one supported SQL database artifact")
 	}
 	stageKind := staging.KindBAK
-	if kind == artifact.KindBACPAC {
+	switch kind {
+	case artifact.KindBACPAC:
 		stageKind = staging.KindBACPAC
+	case artifact.KindSQL:
+		stageKind = staging.KindSQL
 	}
 	saved, err := stager.store.Save(ctx, resolved, stageKind)
 	if err != nil {

@@ -42,8 +42,12 @@ jobs:
             dockerfile: deploy/docker/Dockerfile.restic
           - name: mcp-sqlserver-restore
             dockerfile: deploy/docker/Dockerfile.sqlserver-restore
+          - name: mcp-mysql-restore
+            dockerfile: deploy/docker/Dockerfile.mysql-restore
           - name: mcp-sqlserver-inspect
             dockerfile: deploy/docker/Dockerfile.sqlserver-inspect
+          - name: mcp-mysql-inspect
+            dockerfile: deploy/docker/Dockerfile.mysql-inspect
           - name: cli
             dockerfile: deploy/docker/Dockerfile.cli
     steps:

@@ -19,18 +19,18 @@ type artifactOpener interface {
 
 type stagedArtifact struct {
 	ArtifactID string `json:"artifact_id" jsonschema:"Opaque ID for the resolved artifact; pass to the SQL Server restore MCP tool."`
-	Kind       string `json:"kind" jsonschema:"Resolved database artifact kind: bak or bacpac."`
+	Kind       string `json:"kind" jsonschema:"Resolved database artifact kind: bak, bacpac, or sql."`
 	Size       int64  `json:"size" jsonschema:"Resolved artifact size in bytes."`
 }
 
 type archiveCandidate struct {
 	Path     string `json:"path" jsonschema:"Exact member path inside the archive."`
 	Size     int64  `json:"size" jsonschema:"Uncompressed member size in bytes."`
-	KindHint string `json:"kind_hint" jsonschema:"Suggested artifact kind from the file extension: bak or bacpac."`
+	KindHint string `json:"kind_hint" jsonschema:"Suggested artifact kind from the file extension: bak, bacpac, or sql."`
 }
 
 type archiveCandidateList struct {
-	Candidates []archiveCandidate `json:"candidates" jsonschema:"Terminal .bak/.bacpac members; metadata only."`
+	Candidates []archiveCandidate `json:"candidates" jsonschema:"Terminal .bak/.bacpac/.sql/.sql.gz members; metadata only."`
 	Truncated  bool               `json:"truncated" jsonschema:"True when additional candidates were omitted by the cap."`
 }
 
@@ -83,8 +83,11 @@ func (stager *backupStager) Stage(ctx context.Context, backupID, memberPath stri
 		return stagedArtifact{}, errors.New("selected backup does not contain one supported SQL database artifact")
 	}
 	stageKind := staging.KindBAK
-	if kind == artifact.KindBACPAC {
+	switch kind {
+	case artifact.KindBACPAC:
 		stageKind = staging.KindBACPAC
+	case artifact.KindSQL:
+		stageKind = staging.KindSQL
 	}
 	saved, err := stager.store.Save(ctx, resolved, stageKind)
 	if err != nil {
@@ -140,5 +143,6 @@ func validMemberPath(path string) bool {
 		}
 	}
 	lower := strings.ToLower(path)
-	return strings.HasSuffix(lower, ".bak") || strings.HasSuffix(lower, ".bacpac")
+	return strings.HasSuffix(lower, ".bak") || strings.HasSuffix(lower, ".bacpac") ||
+		strings.HasSuffix(lower, ".sql") || strings.HasSuffix(lower, ".sql.gz")
 }

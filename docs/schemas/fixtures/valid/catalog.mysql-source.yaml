@@ -1,0 +1,13 @@
+apiVersion: reksicherung.1node.xyz/v1alpha2
+kind: BackupCatalog
+backups:
+  - id: demo-mysql
+    provider: gobackup
+    database:
+      type: mysql
+      name: app
+    selection:
+      policy: latest
+    cleanup: delete
+    validation:
+      semanticReview: true

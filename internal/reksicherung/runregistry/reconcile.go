@@ -77,7 +77,7 @@ func (reconciler Reconciler) Reconcile(ctx context.Context, now time.Time) ([]Cl
 		}
 
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-		dropErr := reconciler.Databases.DropDatabase(cleanupCtx, claimed.ID)
+		dropErr := dropRecordDatabase(cleanupCtx, reconciler.Databases, claimed)
 		cancel()
 		outcome := CleanupOutcome{RunID: candidate.ID}
 		if dropErr != nil {

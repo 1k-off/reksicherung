@@ -17,8 +17,8 @@ type heldRunStore interface {
 	Update(context.Context, string, uint64, func(*Record) error) (Record, error)
 }
 
-// DatabaseDropper drops only a run-scoped restored database on the operator-
-// managed SQL Server. Implementations must treat an already-absent database as
+// DatabaseDropper drops only a run-scoped restored database on an operator-
+// managed database server (SQL Server or MySQL, see EngineDropper). Implementations must treat an already-absent database as
 // success and must never stop or remove services.
 type DatabaseDropper interface {
 	DropDatabase(context.Context, string) error
@@ -53,6 +53,13 @@ func CleanupHeld(ctx context.Context, store heldRunStore, databases DatabaseDrop
 		return Record{}, errors.New("run registry: retained database cleanup is not pending")
 	}
 
+	if routed, ok := databases.(EngineDropper); ok {
+		// Reject unsupported or unconfigured engines before changing state.
+		if _, err := DropperFor(record, routed.SQLServer, routed.MySQL); err != nil {
+			return Record{}, err
+		}
+	}
+
 	record, err = store.Update(ctx, runID, record.Revision, func(record *Record) error {
 		record.Status = StatusFinalizing
 		record.CleanupStatus = CleanupInProgress
@@ -62,7 +69,7 @@ func CleanupHeld(ctx context.Context, store heldRunStore, databases DatabaseDrop
 		return Record{}, err
 	}
 
-	dropErr := databases.DropDatabase(ctx, record.ID)
+	dropErr := dropRecordDatabase(ctx, databases, record)
 	updateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if dropErr != nil {

@@ -6,11 +6,17 @@ Day-2 operations and triage using documented inputs only.
 
 ### hold_for_review cleanup
 
+Held runs must first be registered with their engine (the restore-check step
+does this; do it manually if it was skipped):
+
 ```bash
+reksicherung hold -registry /var/lib/reksicherung/runs/runs.db -run-id <id> \
+  -database-type <sqlserver|mysql> -verdict <pass|fail|inconclusive>
 reksicherung cleanup -registry /var/lib/reksicherung/runs/runs.db -run-id <id>
 ```
 
-Requires SQL restore + OpenBao bootstrap env (same as restore MCP).
+Requires OpenBao bootstrap env plus the engine's connection secret (same as the
+restore MCP). Records without `database_type` are dropped as `sqlserver`.
 
 ### Reconciler
 

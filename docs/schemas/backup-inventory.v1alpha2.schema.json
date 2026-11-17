@@ -24,7 +24,7 @@
             "additionalProperties": false,
             "required": ["type", "name"],
             "properties": {
-              "type": { "const": "sqlserver" },
+              "type": { "enum": ["sqlserver", "mysql"] },
               "name": { "type": "string" }
             }
           },
@@ -39,7 +39,7 @@
           },
           "checks": {
             "type": "array",
-            "items": { "enum": ["restore", "sqlserver-integrity", "semantic-review"] }
+            "items": { "enum": ["restore", "sqlserver-integrity", "mysql-integrity", "semantic-review"] }
           },
           "expectedEmptyTables": {
             "type": "array",

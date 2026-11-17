@@ -14,9 +14,10 @@ documented inputs (`docs/inputs.md`) and **published container images**.
 **Default images (lab tag `latest`; pin digests for production):**
 
 ```text
-ghcr.io/1k-off/reksicherung/{mcp-gobackup,mcp-restic,mcp-sqlserver-restore,mcp-sqlserver-inspect,cli}:<TAG>
+ghcr.io/1k-off/reksicherung/{mcp-gobackup,mcp-restic,mcp-sqlserver-restore,mcp-sqlserver-inspect,mcp-mysql-restore,mcp-mysql-inspect,cli}:<TAG>
 openbao/openbao:2.1.0
 mcr.microsoft.com/mssql/server:2022-latest
+mysql:8.4   # only for database.type=mysql sources
 ```
 
 **Prefer copy-paste commands in**
@@ -33,7 +34,8 @@ Airon lab pack: `reksicherung-airon-onboard` (same GHCR images, Airon job layout
 ## Inputs
 
 - `I-COMPOSE-ENV` — `examples/compose/.env` (bootstrap only)
-- `I-OPENBAO-DEFAULTS`, `I-OPENBAO-SQL` — after OpenBao init
+- `I-OPENBAO-DEFAULTS`, `I-OPENBAO-SQL` (and `I-OPENBAO-MYSQL` for
+  `database.type: mysql`) — after OpenBao init
 - `I-CATALOG` — at least one source (may add later via add-source skill)
 - Optional `I-ORCHESTRATOR-JOB` — job YAML for an MCP/skills runner (see
   `examples/airon/` / airon-onboard templates)
@@ -48,7 +50,8 @@ Airon lab pack: `reksicherung-airon-onboard` (same GHCR images, Airon job layout
 
 ```bash
 TAG="${REKSICHERUNG_IMAGE_TAG:-latest}"
-for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect cli; do
+for i in mcp-gobackup mcp-restic mcp-sqlserver-restore mcp-sqlserver-inspect \
+         mcp-mysql-restore mcp-mysql-inspect cli; do
   docker pull "ghcr.io/1k-off/reksicherung/${i}:${TAG}"
 done
 ```
@@ -59,6 +62,9 @@ done
    defaults) per `docs/schemas/openbao-source-kv.md`.
 4. Create SQL restore login matching OpenBao `USERNAME`/`PASSWORD` (RUNBOOK §7)
    or use lab `sa` with matching OpenBao password.
+   **MySQL sources only:** set `MYSQL_ROOT_PASSWORD`, `--profile mysql up -d mysql` (opt-in profile), create the
+   `reksicherung\_%`-scoped account and seed `I-OPENBAO-MYSQL`
+   (`secret/reksicherung/mysql`, RUNBOOK §6b). Skip for SQL Server-only stacks.
 5. Put least-privilege token into `.env` when leaving lab root-token bring-up.
 6. Write thin `I-CATALOG`; validate with GHCR CLI (or local binary if already
    installed) — see RUNBOOK §9. Prefer:

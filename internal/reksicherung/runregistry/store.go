@@ -256,6 +256,9 @@ func validateUpdate(current, next Record) error {
 	if current.DatabaseName != "" && next.DatabaseName != current.DatabaseName {
 		return fmt.Errorf("%w: database name is immutable after it is set", ErrInvalidRecord)
 	}
+	if current.DatabaseName != "" && next.DatabaseType != current.DatabaseType {
+		return fmt.Errorf("%w: database type is immutable once a database name is set", ErrInvalidRecord)
+	}
 	if next.LeaseExpiresAt.Before(current.LeaseExpiresAt) {
 		return fmt.Errorf("%w: lease cannot be shortened", ErrInvalidRecord)
 	}

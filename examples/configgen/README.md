@@ -13,6 +13,7 @@ Skip this folder if backups already exist — go to
 | File | Provider (`-provider`) | Storage | What it backs up |
 | --- | --- | --- | --- |
 | [`gobackup-mssql-s3.yaml`](gobackup-mssql-s3.yaml) | `gobackup` | S3 / MinIO | SQL Server via GoBackup mssql plugin (`.bacpac`) |
+| [`gobackup-mysql-s3.yaml`](gobackup-mysql-s3.yaml) | `gobackup` | S3 / MinIO | MySQL via GoBackup mysql plugin (`port` defaults to 3306) |
 | [`gobackup-mssql-azure-sp.yaml`](gobackup-mssql-azure-sp.yaml) | `gobackup` | Azure | Same, Azure **service principal** only |
 | [`gobackup-archive-sftp.yaml`](gobackup-archive-sftp.yaml) | `gobackup` | SFTP | File archive (gobackup-only storage) |
 | [`gobackup-enhanced-s3.yaml`](gobackup-enhanced-s3.yaml) | `gobackup` | S3 | MSSQL + daily/weekly/monthly schedules |
@@ -66,7 +67,7 @@ used in `archive.includes` (see `resticprofile-sqlbak-s3.yaml`).
 
 | | GoBackup | resticprofile |
 | --- | --- | --- |
-| Databases (`mssql` / …) | yes | no — use `archive` of `.bak` |
+| Databases (`mssql` / `mysql` / …) | yes | no — use `archive` of `.bak` |
 | SFTP | yes | no |
 | Azure auth | service principal refs | exactly one of `account_key_ref` / `account_sas_ref` |
 | Encryption | optional openssl | **required** `encryption.password_ref` → `RESTIC_PASSWORD` |

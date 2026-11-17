@@ -59,7 +59,11 @@ func FromConfig(source config.Catalog, sourceLocation string) (Inventory, error)
 
 	entries := make([]Entry, 0, len(source.Backups))
 	for _, backup := range source.Backups {
-		checks := []string{"restore", "sqlserver-integrity"}
+		integrityCheck := "sqlserver-integrity"
+		if backup.Database.Type == "mysql" {
+			integrityCheck = "mysql-integrity"
+		}
+		checks := []string{"restore", integrityCheck}
 		if backup.Validation.SemanticReview {
 			checks = append(checks, "semantic-review")
 		}

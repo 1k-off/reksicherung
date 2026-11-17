@@ -9,6 +9,7 @@ JSON Schema drafts and markdown contracts for every Reksicherung input.
 | `openbao-defaults.schema.json` | I-OPENBAO-DEFAULTS |
 | `openbao-source.schema.json` | I-OPENBAO-SOURCE |
 | `openbao-sqlserver.schema.json` | I-OPENBAO-SQL |
+| `openbao-mysql.schema.json` | I-OPENBAO-MYSQL |
 | `compose-env.schema.json` | I-COMPOSE-ENV |
 | `orchestrator-job.schema.json` | I-ORCHESTRATOR-JOB |
 | `restore-check-prompt.md` | I-PROMPT |

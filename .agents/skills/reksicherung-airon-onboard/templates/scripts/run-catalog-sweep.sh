@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Daily catalog coverage sweep (Airon only).
-# Assumes OpenBao + SQL Server (+ reconciler) are already up and unsealed.
+# Assumes OpenBao + SQL Server (+ MySQL if used) + reconciler are already up and unsealed.
 #
 #   OPENAI_API_KEY=… ./scripts/run-catalog-sweep.sh
 #

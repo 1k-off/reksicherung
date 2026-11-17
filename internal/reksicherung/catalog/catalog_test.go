@@ -68,6 +68,40 @@ func TestFromConfigProducesDeterministicSecretFreeInventory(t *testing.T) {
 	}
 }
 
+func TestFromConfigIntegrityCheckFollowsDatabaseType(t *testing.T) {
+	source := validSource(t)
+	mysql := source.Backups[0]
+	mysql.ID = "mysql-source"
+	mysql.Database.Type = "mysql"
+	source.Backups = append(source.Backups, mysql)
+
+	inventory, err := FromConfig(source, "catalog.yaml")
+	if err != nil {
+		t.Fatalf("FromConfig() error = %v", err)
+	}
+	for _, entry := range inventory.Backups {
+		var want, unwanted string
+		switch entry.Database.Type {
+		case "mysql":
+			want, unwanted = "mysql-integrity", "sqlserver-integrity"
+		default:
+			want, unwanted = "sqlserver-integrity", "mysql-integrity"
+		}
+		found := false
+		for _, check := range entry.Checks {
+			if check == want {
+				found = true
+			}
+			if check == unwanted {
+				t.Errorf("%s checks contain %q: %v", entry.ID, unwanted, entry.Checks)
+			}
+		}
+		if !found {
+			t.Errorf("%s checks missing %q: %v", entry.ID, want, entry.Checks)
+		}
+	}
+}
+
 func TestFromConfigRejectsInvalidCatalog(t *testing.T) {
 	source := validSource(t)
 	source.Backups[0].ID = "BAD_ID"
