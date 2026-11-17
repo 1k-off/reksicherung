@@ -39,7 +39,8 @@ Both bootstrap and airon-onboard use GHCR (no image build for operators).
 | `reksicherung configgen` | configgen (optional) |
 | MCP gobackup / restic / sqlserver* / mysql* | restore-check (branches on `database.type`), mcp-clients |
 | OpenBao defaults/sqlserver/mysql | bootstrap, compose RUNBOOK |
-| OpenBao per-source KV | add-source, configgen (bindings) |
+| OpenBao public TLS (Traefik) | `examples/openbao-traefik/` (+ `reksicherung openbao` CLI) |
+| OpenBao per-source KV | add-source, configgen (bindings), `reksicherung openbao` |
 | Evidence / hold_for_review | operate, restore-check |
 | Recurring coverage | schedule-verify (+ airon-onboard templates if using Airon) |
 

@@ -41,6 +41,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runReconcile(ctx, args[1:], stderr)
 	case "configgen":
 		return runConfiggen(args[1:], stdout, stderr)
+	case "openbao":
+		return runOpenBao(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return nil
@@ -58,6 +60,7 @@ Usage:
   reksicherung validate  -config <catalog.yaml> -production
   reksicherung catalog   -config <catalog.yaml> [-source-ref <relative-path>] [-production]
   reksicherung configgen -provider gobackup|resticprofile -in <input.yaml> -out <output.yml> [-bindings <bindings.json>]
+  reksicherung openbao   health|kv|approle …
   reksicherung hold      -registry <runs.db> -run-id <id> -database-type sqlserver|mysql -verdict pass|fail|inconclusive
   reksicherung cleanup   -registry <runs.db> -run-id <held-run>
   reksicherung reconcile -registry <runs.db> [-interval 30s] [-once]
@@ -67,6 +70,7 @@ Commands:
   validate   Validate a versioned backup catalog
   catalog    Write the secret-free backup inventory as JSON to stdout
   configgen  Render GoBackup or resticprofile YAML from I-CONFIGGEN input
+  openbao    Provision/verify OpenBao KV and per-source AppRoles
   hold       Register a hold_for_review run with its database type (required for cleanup routing)
   cleanup    Drop a hold_for_review run-scoped database (services stay running)
   reconcile  Retry expired automatic database cleanup leases
@@ -74,5 +78,6 @@ Commands:
 The -production flag requires HTTPS for configured storage endpoints when used.
 cleanup/reconcile require SQL Server and OpenBao environment variables used by
 the restore MCP; they drop databases only and leave operator services untouched.
-configgen never resolves secret references; wire bindings at runtime.`)
+configgen never resolves secret references; wire bindings at runtime via token
+or AppRole (BAO_ROLE_ID / BAO_SECRET_ID) on the backup host.`)
 }

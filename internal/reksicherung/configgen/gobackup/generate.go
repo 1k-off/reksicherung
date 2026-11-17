@@ -145,7 +145,20 @@ func buildModel(
 			"base64":   defaultBool(in.Encryption.Base64, false),
 		}
 	}
+	if script := joinHookCommands(in.Hooks.RunBefore); script != "" {
+		model["before_script"] = script
+	}
+	if script := joinHookCommands(in.Hooks.RunAfter); script != "" {
+		model["after_script"] = script
+	}
 	return model
+}
+
+func joinHookCommands(commands input.StringList) string {
+	if len(commands) == 0 {
+		return ""
+	}
+	return strings.Join(commands, "\n")
 }
 
 func buildStorage(storage input.Storage, bindings *input.Binder, pathSuffix string, keep int) map[string]any {

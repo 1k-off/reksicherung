@@ -1,0 +1,107 @@
+# Public OpenBao for Reksicherung secrets (Traefik TLS on a high port).
+# Lab/internal OpenBao without TLS: examples/compose/
+#
+# Fixes baked in from field bring-up:
+# - command: ["server"] (image default is -dev and fights BAO_LOCAL_CONFIG)
+# - healthcheck allows uninit/sealed so Traefik can register before init
+# - CF_DNS_API_TOKEN for Cloudflare DNS-01
+# - quoted Traefik UI rule (bare && breaks YAML)
+# - host 80/443 unused; HTTPS on OPENBAO_HTTPS_PORT (default 8443)
+
+name: reksicherung-openbao
+
+services:
+  traefik:
+    image: traefik:v3.7.16
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=reksicherung-openbao
+      - --entrypoints.websecure.address=:8443
+      - --certificatesresolvers.le.acme.email=${TRAEFIK_ACME_EMAIL:?set TRAEFIK_ACME_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.dnschallenge=true
+      - --certificatesresolvers.le.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53
+      - --log.level=${TRAEFIK_LOG_LEVEL:-WARN}
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN:?set CF_DNS_API_TOKEN}
+    ports:
+      - "${OPENBAO_HTTPS_PORT:-8443}:8443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+    networks:
+      - openbao
+
+  openbao:
+    image: openbao/openbao:2.3.2
+    restart: unless-stopped
+    command: ["server"]
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_LOCAL_CONFIG: |
+        {
+          "storage": {
+            "file": {
+              "path": "/openbao/file"
+            }
+          },
+          "listener": {
+            "tcp": {
+              "address": "0.0.0.0:8200",
+              "tls_disable": true
+            }
+          },
+          "api_addr": "https://${OPENBAO_HOST:?set OPENBAO_HOST}:${OPENBAO_HTTPS_PORT:-8443}",
+          "cluster_addr": "https://openbao:8201",
+          "ui": true
+        }
+      BAO_ADDR: http://127.0.0.1:8200
+    volumes:
+      - openbao-data:/openbao/file
+    ports:
+      - "127.0.0.1:8200:8200"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "--spider",
+          "http://127.0.0.1:8200/v1/sys/health?standbyok=true&uninitcode=200&sealedcode=200",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=reksicherung-openbao
+      - traefik.http.services.openbao.loadbalancer.server.port=8200
+      - traefik.http.routers.openbao.rule=Host(`${OPENBAO_HOST:?set OPENBAO_HOST}`)
+      - traefik.http.routers.openbao.entrypoints=websecure
+      - traefik.http.routers.openbao.tls=true
+      - traefik.http.routers.openbao.tls.certresolver=le
+      - traefik.http.routers.openbao.service=openbao
+      - traefik.http.routers.openbao.priority=1
+      - "traefik.http.middlewares.openbao-ui-allow.ipallowlist.sourcerange=${OPENBAO_UI_ALLOWLIST:?set OPENBAO_UI_ALLOWLIST}"
+      - "traefik.http.routers.openbao-ui.rule=Host(`${OPENBAO_HOST:?set OPENBAO_HOST}`) && (PathPrefix(`/ui`) || Path(`/`))"
+      - traefik.http.routers.openbao-ui.entrypoints=websecure
+      - traefik.http.routers.openbao-ui.tls=true
+      - traefik.http.routers.openbao-ui.tls.certresolver=le
+      - traefik.http.routers.openbao-ui.middlewares=openbao-ui-allow
+      - traefik.http.routers.openbao-ui.service=openbao
+      - traefik.http.routers.openbao-ui.priority=100
+    networks:
+      - openbao
+
+networks:
+  openbao:
+    name: reksicherung-openbao
+
+volumes:
+  openbao-data:
+  traefik-letsencrypt:

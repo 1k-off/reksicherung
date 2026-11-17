@@ -36,7 +36,7 @@ Paths A and B both use **GHCR** (`latest` or a pinned tag). Do not `compose buil
 | Disk | Room for staging large `.bak` / `.bacpac` |
 | One readable backup | Real object in S3/Azure (or restic repo) matching your `source_id` |
 | MCP host | Cursor, Claude Desktop, or any stdio MCP client |
-| OpenBao token workflow | Commands in compose RUNBOOK (Python or PowerShell for JSON) |
+| OpenBao token workflow | Commands in compose RUNBOOK (Python or PowerShell for JSON). Public TLS OpenBao: [`examples/openbao-traefik/`](../examples/openbao-traefik/) |
 
 Optional: Go toolchain (local `reksicherung` CLI), `bao` CLI on the host,
 Airon + LLM only for path B.

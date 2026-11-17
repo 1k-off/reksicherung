@@ -28,7 +28,10 @@
 
 ## OpenBao
 
-The compose reference uses file storage and TLS disabled for first bring-up on a
+Lab: [`examples/compose/`](../examples/compose/) (loopback HTTP, no public TLS).  
+Public TLS (Traefik + Let's Encrypt Cloudflare DNS-01, high port): [`examples/openbao-traefik/`](../examples/openbao-traefik/).
+
+The lab compose uses file storage and TLS disabled for first bring-up on a
 private network. Before production:
 
 - enable TLS or terminate TLS at a reverse proxy
@@ -40,6 +43,25 @@ private network. Before production:
 
 Token renewal is not implemented inside MCP processes; provision a token valid
 for the process lifetime and restart processes on rotation.
+
+### CLI helpers (`reksicherung openbao`)
+
+Provisioning verbs (admin token via `REKSICHERUNG_OPENBAO_ADDR` /
+`REKSICHERUNG_OPENBAO_TOKEN`, or `BAO_ADDR` / `BAO_TOKEN`):
+
+| Verb | Behavior |
+| --- | --- |
+| `health` | Report initialized / sealed / version |
+| `kv get\|put\|list` | Read/write/list under `secret/reksicherung/…` |
+| `approle ensure -source-id <id>` | Create policy + role `backup-<id>`; print `role_id` + one-time `secret_id` |
+| `approle verify …` | Login with role/secret and prove read of that source |
+
+Model: **one `source_id` ↔ one AppRole ↔ one host credential file** (mode
+`0600`). Backup hosts resolve I-CONFIGGEN bindings at **runtime** (AppRole login
+→ short-lived token → `kv get` → env for GoBackup/resticprofile). Configgen
+never resolves refs at render time.
+
+Root/admin tokens must not live on backup hosts.
 
 ## Evidence and audit
 

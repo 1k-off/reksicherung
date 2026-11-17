@@ -56,9 +56,16 @@ reksicherung configgen \
 3. Review output: placeholders `$REKSICHERUNG_*` only — no secret values.
 4. Deploy generated YAML (and any companion process config) onto the backup
    host with an operator-owned method (ssh, config mgmt). Wire env from
-   `bindings.json` → OpenBao (or equivalent) at runtime.
+   `bindings.json` → OpenBao **at runtime** (token or AppRole
+   `BAO_ROLE_ID`/`BAO_SECRET_ID` → short-lived token → `kv get`). Prefer
+   `reksicherung openbao approle ensure -source-id <id>` then copy creds to
+   the host.
 5. Ensure OpenBao already holds (or will hold) every referenced key.
-6. Continue with `reksicherung-add-source` so restore-check can discover the
+6. Optional `hooks.run_before` / `run_after` for host dump/cleanup (Windows
+   drive-letter paths OK in `archive.includes`). resticprofile emits sidecar
+   `.ps1`/`.sh` scripts next to `-out` — deploy them with the YAML.
+   resticprofile still rejects `databases[]` — dump is operator-owned via hooks.
+7. Continue with `reksicherung-add-source` so restore-check can discover the
    same storage via `source_id`.
 
 ## Fail closed

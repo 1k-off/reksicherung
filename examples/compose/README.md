@@ -11,7 +11,7 @@ Full AI input registry: [`docs/inputs.md`](../../docs/inputs.md).
 
 | Service | Purpose |
 | --- | --- |
-| `openbao` | Persistent file-storage OpenBao (not `-dev`) |
+| `openbao` | Persistent file-storage OpenBao (not `-dev`, loopback only). Public TLS stack: [`../openbao-traefik/`](../openbao-traefik/) |
 | `sqlserver` | Isolated restore target (host `127.0.0.1:11433` → `1433`) |
 | `mysql` (profile `mysql`) | Opt-in isolated MySQL restore target for logical `.sql`/`.sql.gz` dumps (host `127.0.0.1:13306` → `3306`); needs `MYSQL_ROOT_PASSWORD` |
 | `cleanup-reconciler` | Durable drop of expired automatic run-scoped databases (`cli` image) |

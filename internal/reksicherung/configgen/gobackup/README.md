@@ -20,16 +20,18 @@ Supported behavior:
 - S3, MinIO, and SFTP storage configuration.
 - MSSQL, PostgreSQL, and MySQL database sources, including certificate
   verification by default and the `ignore_schema_check` argument mapping.
-- File archives, compression, and OpenSSL encryption,
-  healthchecks notifier switches, and GoBackup's web bind configuration.
+- File archives (POSIX or Windows drive-letter paths), compression, and OpenSSL
+  encryption, healthchecks notifier switches, and GoBackup's web bind
+  configuration.
+- Optional `hooks.run_before` / `hooks.run_after` → model `before_script` /
+  `after_script` (operator-owned dump/cleanup commands).
 
 Not supported here: host or Docker deployment generation (including Compose,
 systemd units, mounts, and env files), batch manifests/config directories,
 `.env` loading or generation-time environment expansion, output-file writing,
 legacy deployment/output options, arbitrary database types, and custom notifier
-implementations. Unrestricted scripts and free-form database arguments are
-deliberately excluded because they can execute arbitrary commands or smuggle
-credential material into generated configuration. Configure runtime environment
+implementations. Free-form database `args` and the legacy `scripts` field remain
+rejected; use `hooks` for pre/post commands. Configure runtime environment
 variables from the returned binding manifest in the Reksicherung launcher.
 
 This input schema rejects credential-shaped YAML fields and rejects endpoint

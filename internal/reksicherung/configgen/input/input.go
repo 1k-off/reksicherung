@@ -20,6 +20,9 @@ type Mode string
 const (
 	ModeSimple   Mode = "simple"
 	ModeEnhanced Mode = "enhanced"
+
+	maxHookCommands    = 32
+	maxHookCommandLen  = 4096
 )
 
 // Input is the supported backup-as-code input schema. Credential values are
@@ -32,9 +35,46 @@ type Input struct {
 	Schedules  Schedules  `yaml:"schedules"`
 	Databases  []Database `yaml:"databases,omitempty"`
 	Archive    *Archive   `yaml:"archive,omitempty"`
+	Hooks      Hooks      `yaml:"hooks,omitempty"`
 	Encryption Encryption `yaml:"encryption,omitempty"`
 	Notifiers  Notifiers  `yaml:"notifiers,omitempty"`
 	Web        Web        `yaml:"web,omitempty"`
+}
+
+// Hooks holds optional host-side pre/post commands. Credential material must
+// come from runtime env / *_ref bindings — not from plaintext fields in YAML.
+type Hooks struct {
+	RunBefore StringList `yaml:"run_before,omitempty"`
+	RunAfter  StringList `yaml:"run_after,omitempty"`
+}
+
+// StringList accepts a YAML string or a sequence of strings.
+type StringList []string
+
+// UnmarshalYAML decodes a scalar or sequence into StringList.
+func (s *StringList) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil {
+		*s = nil
+		return nil
+	}
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var one string
+		if err := value.Decode(&one); err != nil {
+			return err
+		}
+		*s = []string{one}
+		return nil
+	case yaml.SequenceNode:
+		var many []string
+		if err := value.Decode(&many); err != nil {
+			return err
+		}
+		*s = many
+		return nil
+	default:
+		return errors.New("hooks commands must be a string or list of strings")
+	}
 }
 
 type Project struct {
@@ -217,6 +257,9 @@ func (in Input) Validate() error {
 	if err := validateDatabases(in.Databases); err != nil {
 		return err
 	}
+	if err := validateHooks(in.Hooks); err != nil {
+		return err
+	}
 	if in.Archive != nil {
 		if len(in.Archive.Includes) == 0 {
 			return errors.New("archive.includes must contain at least one absolute path")
@@ -224,7 +267,7 @@ func (in Input) Validate() error {
 		paths := append(append([]string(nil), in.Archive.Includes...), in.Archive.Excludes...)
 		for _, p := range paths {
 			if !validArchivePath(p) {
-				return errors.New("archive paths must be absolute and cannot contain traversal segments")
+				return errors.New("archive paths must be absolute (POSIX or Windows drive-letter) and cannot contain traversal segments")
 			}
 		}
 		if in.Archive.CompressType != "" && !validKeyName(in.Archive.CompressType) {
@@ -544,16 +587,63 @@ func isASCIILowerAlphaNumeric(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= '0' && r <= '9'
 }
 
+func validateHooks(h Hooks) error {
+	if err := validateHookList(h.RunBefore, "hooks.run_before"); err != nil {
+		return err
+	}
+	return validateHookList(h.RunAfter, "hooks.run_after")
+}
+
+func validateHookList(commands StringList, field string) error {
+	if len(commands) > maxHookCommands {
+		return fmt.Errorf("%s cannot contain more than %d commands", field, maxHookCommands)
+	}
+	for _, command := range commands {
+		if strings.TrimSpace(command) == "" {
+			return fmt.Errorf("%s commands must be non-empty", field)
+		}
+		if len(command) > maxHookCommandLen {
+			return fmt.Errorf("%s command exceeds %d characters", field, maxHookCommandLen)
+		}
+		if !safeText(command) {
+			return fmt.Errorf("%s commands cannot contain control characters", field)
+		}
+	}
+	return nil
+}
+
 func validArchivePath(value string) bool {
-	if !path.IsAbs(value) || !safeText(value) || strings.Contains(value, `\`) {
+	if value == "" || !safeText(value) {
 		return false
 	}
-	for _, segment := range strings.Split(value, "/") {
+	normalized := strings.ReplaceAll(value, `\`, `/`)
+	var rest string
+	switch {
+	case isWindowsDrivePath(normalized):
+		// Reject mixed separators that are not drive-letter Windows paths.
+		rest = normalized[2:]
+	case path.IsAbs(normalized) && !strings.Contains(value, `\`):
+		rest = normalized
+	default:
+		return false
+	}
+	for _, segment := range strings.Split(rest, "/") {
 		if segment == ".." {
 			return false
 		}
 	}
 	return true
+}
+
+func isWindowsDrivePath(normalized string) bool {
+	if len(normalized) < 3 {
+		return false
+	}
+	drive := normalized[0]
+	if !((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')) {
+		return false
+	}
+	return normalized[1] == ':' && normalized[2] == '/'
 }
 
 func safeText(value string) bool {
