@@ -74,6 +74,8 @@ jobs:
             reksicherung-mcp-restic:./cmd/reksicherung-mcp-restic
             reksicherung-mcp-sqlserver:./cmd/reksicherung-mcp-sqlserver
             reksicherung-mcp-sqlserver-restore:./cmd/reksicherung-mcp-sqlserver-restore
+            reksicherung-mcp-mysql:./cmd/reksicherung-mcp-mysql
+            reksicherung-mcp-mysql-restore:./cmd/reksicherung-mcp-mysql-restore
           )
 
           for entry in "${binaries[@]}"; do
