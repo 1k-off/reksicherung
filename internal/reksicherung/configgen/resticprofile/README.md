@@ -16,11 +16,15 @@ Supported subset (v1):
   `AZURE_ACCOUNT_SAS`
 - File archive sources (`archive.includes` / `excludes`); POSIX or Windows
   drive-letter paths
-- Optional `hooks.run_before` / `hooks.run_after` → sidecar scripts + short
-  `backup.run-before` / `run-after` invocations (`powershell -File …ps1` on
-  Windows hosts, `sh …sh` otherwise). Avoids nested-quote breakage in
-  resticprofile ([#582](https://github.com/creativeprojects/resticprofile/issues/582)).
-  Dump/cleanup remain operator-owned; no `databases[]` mapping
+- Optional `hooks.run_before` / `hooks.run_after` (legacy util/configgen parity):
+  - Windows → pure PowerShell `<project>-backup.ps1` / `<project>-cleanup.ps1`
+    (+ `.unsafe.ps1`); profile calls `powershell -File C:\restic\config\…`
+  - Embed `openbao://…#key` in hook strings → `$env:REKSICHERUNG_*` in safe
+    scripts, substituted in unsafe
+  - POSIX hooks stay inline
+  - Always emits `exclude` (possibly `[]`), `check-before: false`,
+    `schedule-permission: system`, `schedule-log: logs/<profile>-restic-*.log`
+  - Dump/cleanup remain operator-owned; no `databases[]` mapping
 - Repository password via `encryption.password_ref` → `RESTIC_PASSWORD` binding
 
 Rejected: databases, web, sftp, azure service principal refs,

@@ -21,8 +21,10 @@ const (
 	ModeSimple   Mode = "simple"
 	ModeEnhanced Mode = "enhanced"
 
-	maxHookCommands    = 32
-	maxHookCommandLen  = 4096
+	// Large Windows restic hosts (onsite/msp) expand bak dumps into many
+	// PowerShell steps; 32 was too low for migrated util/configgen configs.
+	maxHookCommands   = 128
+	maxHookCommandLen = 4096
 )
 
 // Input is the supported backup-as-code input schema. Credential values are

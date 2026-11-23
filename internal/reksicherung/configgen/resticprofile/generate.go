@@ -21,8 +21,10 @@ type Result struct {
 // Generate validates the shared input and the resticprofile subset, then
 // renders deterministic resticprofile v1 YAML. Secret references become
 // $REKSICHERUNG_* placeholders; no secret values are resolved or returned.
-// Hook commands are wrapped into sidecar scripts to avoid Windows cmd quoting
-// bugs in resticprofile run-before/run-after.
+//
+// Windows hooks match legacy util/configgen restic: run_before / run_after
+// become pure PowerShell <project>-backup.ps1 / <project>-cleanup.ps1 sidecars
+// referenced via powershell -File C:\restic\config\….
 func Generate(in input.Input) (Result, error) {
 	if err := in.Validate(); err != nil {
 		return Result{}, err
@@ -30,13 +32,13 @@ func Generate(in input.Input) (Result, error) {
 	if err := ValidateForProvider(in); err != nil {
 		return Result{}, err
 	}
-	sidecars, beforeInv, afterInv := wrapHooks(in)
+	bindings := input.NewBinder()
+	sidecars, beforeInv, afterInv := wrapHooks(in, bindings)
 	for _, sc := range sidecars {
 		if err := validSidecarName(sc.Name); err != nil {
 			return Result{}, err
 		}
 	}
-	bindings := input.NewBinder()
 	doc, err := buildDocument(in, bindings, beforeInv, afterInv)
 	if err != nil {
 		return Result{}, err
@@ -85,7 +87,7 @@ func buildDocument(in input.Input, bindings *input.Binder, beforeInv, afterInv [
 
 	switch mode {
 	case input.ModeSimple:
-		profile, err := buildProfile(in, bindings, "", in.Schedules.Cron, defaultKeep(in.Schedules.Keep, 14), in.Schedules.HealthcheckURLRef, "schedules_healthcheck_url", beforeInv, afterInv)
+		profile, err := buildProfile(in, bindings, projectName, "", in.Schedules.Cron, defaultKeep(in.Schedules.Keep, 14), in.Schedules.HealthcheckURLRef, "schedules_healthcheck_url", beforeInv, afterInv)
 		if err != nil {
 			return nil, err
 		}
@@ -104,9 +106,11 @@ func buildDocument(in input.Input, bindings *input.Binder, beforeInv, afterInv [
 			if pathSuffix == "" {
 				pathSuffix = tier.name
 			}
+			profileName := projectName + "-" + tier.name
 			profile, err := buildProfile(
 				in,
 				bindings,
+				profileName,
 				pathSuffix,
 				tier.schedule.Cron,
 				defaultKeep(tier.schedule.Keep, tier.keep),
@@ -118,7 +122,7 @@ func buildDocument(in input.Input, bindings *input.Binder, beforeInv, afterInv [
 			if err != nil {
 				return nil, err
 			}
-			doc[projectName+"-"+tier.name] = profile
+			doc[profileName] = profile
 		}
 	}
 	return doc, nil
@@ -127,6 +131,7 @@ func buildDocument(in input.Input, bindings *input.Binder, beforeInv, afterInv [
 func buildProfile(
 	in input.Input,
 	bindings *input.Binder,
+	profileName string,
 	pathSuffix string,
 	cron string,
 	keep int,
@@ -140,13 +145,20 @@ func buildProfile(
 		return nil, err
 	}
 	healthURL := bindings.Placeholder(healthcheckBindingPath, healthcheckURLRef)
-	backup := map[string]any{
-		"source":      append([]string(nil), in.Archive.Includes...),
-		"schedule":    cron,
-		"check-after": true,
+	excludes := in.Archive.Excludes
+	if excludes == nil {
+		excludes = []string{}
+	} else {
+		excludes = append([]string(nil), excludes...)
 	}
-	if len(in.Archive.Excludes) > 0 {
-		backup["exclude"] = append([]string(nil), in.Archive.Excludes...)
+	backup := map[string]any{
+		"source":               append([]string(nil), in.Archive.Includes...),
+		"exclude":              excludes,
+		"schedule-permission":  "system",
+		"schedule-log":         fmt.Sprintf("logs/%s-restic-backup.log", profileName),
+		"schedule":             cron,
+		"check-after":          true,
+		"check-before":         false,
 	}
 	if len(beforeInv) > 0 {
 		backup["run-before"] = append([]string(nil), beforeInv...)
@@ -180,9 +192,11 @@ func buildProfile(
 		"repository": repo,
 		"backup":     backup,
 		"forget": map[string]any{
-			"keep-last": keep,
-			"prune":     true,
-			"schedule":  cron,
+			"keep-last":            keep,
+			"prune":                true,
+			"schedule-permission":  "system",
+			"schedule-log":         fmt.Sprintf("logs/%s-restic-forget.log", profileName),
+			"schedule":             cron,
 		},
 	}, nil
 }

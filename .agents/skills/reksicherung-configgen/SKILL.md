@@ -62,8 +62,9 @@ reksicherung configgen \
    Prefer `reksicherung openbao approle ensure -source-id <id>` then copy creds.
 5. Ensure OpenBao already holds every referenced key (unsafe render fails closed).
 6. Optional `hooks.run_before` / `run_after` for host dump/cleanup (Windows
-   drive-letter paths OK in `archive.includes`). resticprofile emits sidecar
-   `.ps1`/`.sh` scripts next to `-out` — deploy them with the YAML.
+   drive-letter paths OK in `archive.includes`). resticprofile Windows:
+   `<project>-backup.ps1` / `<project>-cleanup.ps1` (+ `.unsafe.ps1`). Embed
+   `openbao://…#key` in hook strings for secrets. Deploy YAML + sidecars.
    resticprofile still rejects `databases[]` — dump is operator-owned via hooks.
 7. Continue with `reksicherung-add-source` so restore-check can discover the
    same storage via `source_id`.

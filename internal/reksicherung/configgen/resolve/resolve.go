@@ -17,11 +17,51 @@ import (
 // resolved through provider. Fail closed on missing refs or empty values.
 // The returned document may contain secrets — callers must treat it as sensitive.
 func UnsafeYAML(ctx context.Context, safeYAML []byte, bindings []input.Binding, provider secrets.SecretProvider) ([]byte, error) {
+	replacements, err := resolveReplacements(ctx, bindings, provider)
+	if err != nil {
+		return nil, err
+	}
+	if len(replacements) == 0 {
+		return append([]byte(nil), safeYAML...), nil
+	}
+
+	var doc any
+	if err := yaml.Unmarshal(safeYAML, &doc); err != nil {
+		return nil, fmt.Errorf("resolve: parse safe yaml: %w", err)
+	}
+	if err := substitute(doc, replacements); err != nil {
+		return nil, err
+	}
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return nil, fmt.Errorf("resolve: marshal unsafe yaml: %w", err)
+	}
+	return out, nil
+}
+
+// UnsafeText substitutes $REKSICHERUNG_* placeholders in arbitrary text
+// (e.g. hook sidecar scripts). Fail closed like UnsafeYAML.
+func UnsafeText(ctx context.Context, safe []byte, bindings []input.Binding, provider secrets.SecretProvider) ([]byte, error) {
+	replacements, err := resolveReplacements(ctx, bindings, provider)
+	if err != nil {
+		return nil, err
+	}
+	if len(replacements) == 0 {
+		return append([]byte(nil), safe...), nil
+	}
+	out, err := replaceAll(string(safe), replacements)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(out), nil
+}
+
+func resolveReplacements(ctx context.Context, bindings []input.Binding, provider secrets.SecretProvider) ([]replacement, error) {
 	if provider == nil {
 		return nil, fmt.Errorf("resolve: secret provider is required")
 	}
 	if len(bindings) == 0 {
-		return append([]byte(nil), safeYAML...), nil
+		return nil, nil
 	}
 
 	replacements := make([]replacement, 0, len(bindings))
@@ -41,28 +81,17 @@ func UnsafeYAML(ctx context.Context, safeYAML []byte, bindings []input.Binding, 
 		if value == "" {
 			return nil, fmt.Errorf("resolve: %s resolved to an empty value", binding.EnvironmentVariable)
 		}
-		replacements = append(replacements, replacement{
-			placeholder: "$" + binding.EnvironmentVariable,
-			value:       value,
-		})
+		replacements = append(replacements,
+			replacement{placeholder: "$" + binding.EnvironmentVariable, value: value},
+			// PowerShell safe sidecars use $env:REKSICHERUNG_* for runtime env.
+			replacement{placeholder: "$env:" + binding.EnvironmentVariable, value: value},
+		)
 	}
-	// Longer placeholders first so $FOO does not clobber $FOO_BAR.
+	// Longer placeholders first so $FOO / $env:FOO do not clobber longer names.
 	sort.Slice(replacements, func(i, j int) bool {
 		return len(replacements[i].placeholder) > len(replacements[j].placeholder)
 	})
-
-	var doc any
-	if err := yaml.Unmarshal(safeYAML, &doc); err != nil {
-		return nil, fmt.Errorf("resolve: parse safe yaml: %w", err)
-	}
-	if err := substitute(doc, replacements); err != nil {
-		return nil, err
-	}
-	out, err := yaml.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("resolve: marshal unsafe yaml: %w", err)
-	}
-	return out, nil
+	return replacements, nil
 }
 
 type replacement struct {

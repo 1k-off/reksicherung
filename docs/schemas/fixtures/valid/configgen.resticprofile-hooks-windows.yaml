@@ -16,12 +16,12 @@ schedules:
   healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-win-sql
 archive:
   includes:
-    - "C:/backups/demo-win-sql.bacpac"
+    - "C:\\backups\\demo-win-sql.bacpac"
 hooks:
   run_before:
-    - 'sqlpackage /Action:Export /TargetFile:"C:\backups\demo-win-sql.bacpac"'
+    - 'sqlpackage /Action:Export /SourceConnectionString:openbao://secret/reksicherung/backup-db/demo-win-sql#connection /TargetFile:C:\backups\demo-win-sql.bacpac'
   run_after:
-    - 'del /f /q "C:\backups\demo-win-sql.bacpac"'
+    - "Remove-Item -Path 'C:\\backups\\demo-win-sql.bacpac' -Force"
 encryption:
   enabled: true
   password_ref: openbao://secret/reksicherung/sources/demo-win-sql#RESTIC_PASSWORD

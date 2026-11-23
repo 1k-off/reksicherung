@@ -59,12 +59,17 @@ encryption:
 	assertEqual(t, backup, "source", []any{"/var/lib/app"})
 	assertEqual(t, backup, "exclude", []any{"/var/lib/app/tmp"})
 	assertEqual(t, backup, "schedule", "0 5 * * *")
+	assertEqual(t, backup, "schedule-permission", "system")
+	assertEqual(t, backup, "schedule-log", "logs/my_app-restic-backup.log")
 	assertEqual(t, backup, "check-after", true)
+	assertEqual(t, backup, "check-before", false)
 	sendBefore := backup["send-before"].([]any)[0].(map[string]any)
 	assertEqual(t, sendBefore, "url", "$REKSICHERUNG_SCHEDULES_HEALTHCHECK_URL/start")
 	forget := mapAt(t, profile, "forget")
 	assertEqual(t, forget, "keep-last", 14)
 	assertEqual(t, forget, "prune", true)
+	assertEqual(t, forget, "schedule-permission", "system")
+	assertEqual(t, forget, "schedule-log", "logs/my_app-restic-forget.log")
 
 	assertBindings(t, result.Bindings, map[string]string{
 		"REKSICHERUNG_ENCRYPTION_PASSWORD":       encryptionRef,
@@ -162,9 +167,10 @@ func TestGenerateIsDeterministic(t *testing.T) {
 
 func TestGenerateEmitsHooks(t *testing.T) {
 	in := archiveInput()
+	sqlPasswordRef := "openbao://secret/reksicherung/backup-db/demo#password"
 	in.Hooks = input.Hooks{
-		RunBefore: input.StringList{`sqlpackage /Action:Export /TargetFile:"C:\backups\app.bacpac"`},
-		RunAfter:  input.StringList{`del /f /q "C:\backups\app.bacpac"`},
+		RunBefore: input.StringList{`C:\bin\sqlpackage\sqlpackage.exe /Action:Export /SourcePassword:` + sqlPasswordRef + ` /TargetFile:C:\backups\app.bacpac`},
+		RunAfter:  input.StringList{`Remove-Item -Path 'C:\backups\app.bacpac' -Force`},
 	}
 	in.Archive = &input.Archive{Includes: []string{`C:\backups\app.bacpac`}}
 	result, err := Generate(in)
@@ -173,8 +179,11 @@ func TestGenerateEmitsHooks(t *testing.T) {
 	}
 	backup := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "service_name"), "backup")
 	assertEqual(t, backup, "source", []any{`C:\backups\app.bacpac`})
-	assertEqual(t, backup, "run-before", []any{"powershell -NoProfile -ExecutionPolicy Bypass -File service_name-run-before.ps1"})
-	assertEqual(t, backup, "run-after", []any{"powershell -NoProfile -ExecutionPolicy Bypass -File service_name-run-after.ps1"})
+	assertEqual(t, backup, "exclude", []any{})
+	assertEqual(t, backup, "schedule-permission", "system")
+	assertEqual(t, backup, "check-before", false)
+	assertEqual(t, backup, "run-before", []any{`powershell -File C:\restic\config\service_name-backup.ps1`})
+	assertEqual(t, backup, "run-after", []any{`powershell -File C:\restic\config\service_name-cleanup.ps1`})
 	if _, ok := backup["send-before"]; !ok {
 		t.Fatal("expected healthcheck send-before to remain")
 	}
@@ -185,42 +194,42 @@ func TestGenerateEmitsHooks(t *testing.T) {
 	for _, sc := range result.Sidecars {
 		byName[sc.Name] = string(sc.Content)
 	}
-	before := byName["service_name-run-before.ps1"]
-	if !strings.Contains(before, `$ErrorActionPreference = 'Stop'`) {
-		t.Fatalf("before script = %q", before)
+	backupScript := byName["service_name-backup.ps1"]
+	if backupScript == "" || strings.Contains(backupScript, "cmd.exe") {
+		t.Fatalf("backup script = %q", backupScript)
 	}
-	if !strings.Contains(before, `cmd.exe /c 'sqlpackage /Action:Export /TargetFile:"C:\backups\app.bacpac"'`) {
-		t.Fatalf("before script missing wrapped command: %q", before)
+	if !strings.Contains(backupScript, `$ErrorActionPreference = 'Stop'`) {
+		t.Fatalf("backup script = %q", backupScript)
 	}
-	if !strings.Contains(before, "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }") {
-		t.Fatalf("before script missing exit check: %q", before)
+	if !strings.Contains(backupScript, `C:\bin\sqlpackage\sqlpackage.exe /Action:Export /SourcePassword:$env:REKSICHERUNG_HOOKS_RUN_BEFORE_0_REF_0 /TargetFile:C:\backups\app.bacpac`) {
+		t.Fatalf("backup missing exact command: %q", backupScript)
 	}
-	after := byName["service_name-run-after.ps1"]
-	if !strings.Contains(after, `cmd.exe /c 'del /f /q "C:\backups\app.bacpac"'`) {
-		t.Fatalf("after script = %q", after)
+	cleanup := byName["service_name-cleanup.ps1"]
+	if !strings.Contains(cleanup, `Remove-Item -Path 'C:\backups\app.bacpac' -Force`) {
+		t.Fatalf("cleanup missing exact command: %q", cleanup)
 	}
+	assertBindings(t, result.Bindings, map[string]string{
+		"REKSICHERUNG_ENCRYPTION_PASSWORD":       encryptionRef,
+		"REKSICHERUNG_HOOKS_RUN_BEFORE_0_REF_0":  sqlPasswordRef,
+		"REKSICHERUNG_SCHEDULES_HEALTHCHECK_URL": healthRef,
+	})
 }
 
-func TestGenerateWrapsPOSIXHooksAsShellScripts(t *testing.T) {
+func TestGeneratePOSIXHooksStayInline(t *testing.T) {
 	in := archiveInput()
 	in.Hooks = input.Hooks{
 		RunBefore: input.StringList{`pg_dump -f /var/backups/app.dump app`},
+		RunAfter:  input.StringList{`rm -f /var/backups/app.dump`},
 	}
 	result, err := Generate(in)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 	backup := mapAt(t, mapAt(t, decodeOutput(t, result.YAML), "service_name"), "backup")
-	assertEqual(t, backup, "run-before", []any{"sh service_name-run-before.sh"})
-	if len(result.Sidecars) != 1 || result.Sidecars[0].Name != "service_name-run-before.sh" {
+	assertEqual(t, backup, "run-before", []any{`pg_dump -f /var/backups/app.dump app`})
+	assertEqual(t, backup, "run-after", []any{`rm -f /var/backups/app.dump`})
+	if len(result.Sidecars) != 0 {
 		t.Fatalf("sidecars = %#v", result.Sidecars)
-	}
-	body := string(result.Sidecars[0].Content)
-	if !strings.HasPrefix(body, "#!/bin/sh\n") || !strings.Contains(body, "set -eu\n") {
-		t.Fatalf("sh script = %q", body)
-	}
-	if !strings.Contains(body, `pg_dump -f /var/backups/app.dump app`) {
-		t.Fatalf("sh script missing command: %q", body)
 	}
 }
 

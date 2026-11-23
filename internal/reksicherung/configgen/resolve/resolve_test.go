@@ -68,3 +68,33 @@ func TestUnsafeYAMLFailsClosedOnMissingSecret(t *testing.T) {
 		t.Fatal("UnsafeYAML() unexpectedly succeeded")
 	}
 }
+
+func TestUnsafeTextSubstitutesPlaceholders(t *testing.T) {
+	safe := []byte("$ErrorActionPreference = 'Stop'\r\nRemove-Item -Path '$REKSICHERUNG_HOOKS_PATH' -Force\r\n")
+	bindings := []input.Binding{
+		{EnvironmentVariable: "REKSICHERUNG_HOOKS_PATH", SecretReference: "openbao://secret/paths#tmp"},
+	}
+	provider := fakeProvider{"secret/paths#tmp": `C:\restic\temp\app.bacpac`}
+	got, err := UnsafeText(context.Background(), safe, bindings, provider)
+	if err != nil {
+		t.Fatalf("UnsafeText() error = %v", err)
+	}
+	if !strings.Contains(string(got), `C:\restic\temp\app.bacpac`) || strings.Contains(string(got), "$REKSICHERUNG_") {
+		t.Fatalf("unexpected UnsafeText output: %s", got)
+	}
+}
+
+func TestUnsafeTextSubstitutesPowerShellEnvPlaceholders(t *testing.T) {
+	safe := []byte(`sqlpackage /SourcePassword:$env:REKSICHERUNG_HOOKS_RUN_BEFORE_0_REF_0 /TargetFile:C:\backups\app.bacpac`)
+	bindings := []input.Binding{
+		{EnvironmentVariable: "REKSICHERUNG_HOOKS_RUN_BEFORE_0_REF_0", SecretReference: "openbao://secret/db#password"},
+	}
+	provider := fakeProvider{"secret/db#password": "s3cret"}
+	got, err := UnsafeText(context.Background(), safe, bindings, provider)
+	if err != nil {
+		t.Fatalf("UnsafeText() error = %v", err)
+	}
+	if string(got) != `sqlpackage /SourcePassword:s3cret /TargetFile:C:\backups\app.bacpac` {
+		t.Fatalf("got %q", got)
+	}
+}

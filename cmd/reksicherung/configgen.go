@@ -102,6 +102,14 @@ func runConfiggenContext(ctx context.Context, args []string, stdout, stderr io.W
 		if err := os.WriteFile(path, sc.Content, mode); err != nil {
 			return fmt.Errorf("write hook sidecar: %w", err)
 		}
+		unsafeSidecar, err := resolve.UnsafeText(ctx, sc.Content, bindings, bao)
+		if err != nil {
+			return fmt.Errorf("configgen unsafe sidecar %s: %w", sc.Name, err)
+		}
+		unsafeSidecarPath := filepath.Join(outDir, configgenUnsafeSidecarName(sc.Name))
+		if err := os.WriteFile(unsafeSidecarPath, unsafeSidecar, 0o600); err != nil {
+			return fmt.Errorf("write unsafe hook sidecar: %w", err)
+		}
 	}
 	if strings.TrimSpace(*bindingsPath) != "" {
 		if err := os.MkdirAll(filepath.Dir(*bindingsPath), 0o755); err != nil {
@@ -131,4 +139,13 @@ func configgenOutputPaths(out string) (safePath, unsafePath string) {
 		ext = ".yml"
 	}
 	return stem + ".safe" + ext, stem + ".unsafe" + ext
+}
+
+func configgenUnsafeSidecarName(name string) string {
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	if ext == "" {
+		return stem + ".unsafe"
+	}
+	return stem + ".unsafe" + ext
 }

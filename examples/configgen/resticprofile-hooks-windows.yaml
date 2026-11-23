@@ -1,8 +1,12 @@
 # I-CONFIGGEN → reksicherung configgen -provider resticprofile
 # Windows sqlbak-style: operator dump via hooks, restic archives the artifact.
 # databases[] remains unsupported for resticprofile — dump is operator-owned.
-# Hooks with nested quotes are written to *.ps1 sidecars beside the YAML;
-# profile run-before/run-after call `powershell -File <script>.ps1` (#582).
+#
+# Legacy parity with util/configgen restic:
+#   run_before / run_after → pure PowerShell <project>-backup.ps1 /
+#   <project>-cleanup.ps1 (+ .unsafe.ps1); profile calls
+#   powershell -File C:\restic\config\…
+# Embed openbao://…#key in hook strings for secrets.
 project:
   name: demo-win-sql
   service: app
@@ -21,12 +25,12 @@ schedules:
   healthcheck_url_ref: openbao://secret/reksicherung/healthchecks#demo-win-sql
 archive:
   includes:
-    - "C:/backups/demo-win-sql.bacpac"
+    - "C:\\backups\\demo-win-sql.bacpac"
 hooks:
   run_before:
-    - 'sqlpackage /Action:Export /SourceConnectionString:"%SQLCMDLINE%" /TargetFile:"C:\backups\demo-win-sql.bacpac"'
+    - 'sqlpackage /Action:Export /SourceConnectionString:openbao://secret/reksicherung/backup-db/demo-win-sql#connection /TargetFile:C:\backups\demo-win-sql.bacpac'
   run_after:
-    - 'del /f /q "C:\backups\demo-win-sql.bacpac"'
+    - "Remove-Item -Path 'C:\\backups\\demo-win-sql.bacpac' -Force"
 encryption:
   enabled: true
   password_ref: openbao://secret/reksicherung/sources/demo-win-sql#RESTIC_PASSWORD

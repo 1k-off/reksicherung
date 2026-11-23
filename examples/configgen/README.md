@@ -48,12 +48,12 @@ reksicherung configgen \
   local/operator use only — never commit.
 
 Optional `hooks.run_before` / `hooks.run_after` map to GoBackup
-`before_script`/`after_script`, and for resticprofile to **sidecar scripts**
-beside `-out` (`.ps1` when archive paths are Windows drive-letter, else `.sh`)
-with profile hooks calling `powershell -File …` / `sh …` — workaround for
-resticprofile [#582](https://github.com/creativeprojects/resticprofile/issues/582).
-Deploy the YAML and sidecars together. Dump production for resticprofile is
-operator-owned (hooks + `archive.includes`); `databases[]` stays GoBackup-only.
+`before_script`/`after_script`. For resticprofile (legacy parity): Windows
+hooks become pure PowerShell `<project>-backup.ps1` /
+`<project>-cleanup.ps1` (+ `.unsafe.ps1`) referenced as
+`powershell -File C:\restic\config\…`. Embed `openbao://…#key` in hook
+strings for secrets. Dump production for resticprofile is operator-owned
+(hooks + `archive.includes`); `databases[]` stays GoBackup-only.
 
 ## After render
 
